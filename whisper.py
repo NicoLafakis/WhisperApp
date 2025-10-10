@@ -17,6 +17,14 @@ try:
 except Exception:
     OpenAI = None
 
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+except Exception:
+    pystray = None
+    Image = None
+    ImageDraw = None
+
 # --- Constants & defaults ---
 APP = "Whisper"
 APPDIR = Path(os.getenv("APPDATA") or Path.home()/"AppData"/"Roaming")/APP
@@ -274,6 +282,9 @@ def on_toggle_hotkey():
     status = "ENABLED" if state["enabled"] else "DISABLED"
     log(f"Whisper {status}")
     
+    # Update system tray icon
+    TRAY.update_icon()
+    
     # If disabling while recording, stop the recording
     if not state["enabled"] and state["recording"]:
         try:
@@ -283,6 +294,115 @@ def on_toggle_hotkey():
         except Exception as e:
             err(f"Error stopping recording: {e}")
 
+# --- System Tray functionality ---
+class SystemTray:
+    def __init__(self):
+        self.icon = None
+        self.settings_window = None
+        
+    def create_icon_image(self, enabled=True):
+        """Create a simple microphone icon for the system tray"""
+        if not Image or not ImageDraw:
+            return None
+            
+        # Create a 64x64 image
+        width = height = 64
+        image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        
+        # Draw microphone shape
+        color = (0, 150, 0) if enabled else (150, 0, 0)  # Green if enabled, red if disabled
+        
+        # Microphone body (rectangle)
+        draw.rectangle([20, 15, 44, 35], fill=color, outline=color)
+        
+        # Microphone grille lines  
+        for y in range(18, 33, 3):
+            draw.line([22, y, 42, y], fill=(255, 255, 255), width=1)
+            
+        # Stand (vertical line)
+        draw.line([32, 35, 32, 45], fill=color, width=3)
+        
+        # Base (horizontal line)
+        draw.line([25, 45, 39, 45], fill=color, width=3)
+        
+        return image
+        
+    def create_menu(self):
+        """Create the right-click context menu"""
+        status_text = "✓ Enabled" if state["enabled"] else "✗ Disabled"
+        return pystray.Menu(
+            pystray.MenuItem(f"Whisper STT - {status_text}", None, enabled=False),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Open Settings", self.show_settings),
+            pystray.MenuItem("Toggle Enable/Disable", self.toggle_whisper),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Exit", self.quit_app)
+        )
+        
+    def show_settings(self, icon=None, item=None):
+        """Show the settings window"""
+        if self.settings_window is None or not self.settings_window.winfo_exists():
+            self.settings_window = SettingsUI()
+            # Make sure window appears on top
+            self.settings_window.lift()
+            self.settings_window.attributes('-topmost', True)
+            self.settings_window.after_idle(self.settings_window.attributes, '-topmost', False)
+        else:
+            # Bring existing window to front
+            self.settings_window.lift()
+            self.settings_window.deiconify()
+            
+    def toggle_whisper(self, icon=None, item=None):
+        """Toggle Whisper on/off from tray menu"""
+        on_toggle_hotkey()  # Use existing toggle function
+        self.update_icon()
+        
+    def update_icon(self):
+        """Update the tray icon to reflect current status"""
+        if self.icon:
+            new_image = self.create_icon_image(state["enabled"])
+            new_menu = self.create_menu()
+            self.icon.icon = new_image
+            self.icon.menu = new_menu
+            
+    def quit_app(self, icon=None, item=None):
+        """Completely exit the application"""
+        log("Exiting Whisper application...")
+        if self.icon:
+            self.icon.stop()
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.quit()
+        os._exit(0)  # Force exit
+        
+    def start_tray(self):
+        """Start the system tray icon"""
+        if not pystray or not Image:
+            err("System tray dependencies not available. Install: pip install pystray pillow")
+            return False
+            
+        try:
+            image = self.create_icon_image(state["enabled"])
+            menu = self.create_menu()
+            
+            self.icon = pystray.Icon(
+                name="WhisperSTT",
+                icon=image,
+                title="Whisper Speech-to-Text",
+                menu=menu
+            )
+            
+            # Run tray icon in separate thread
+            threading.Thread(target=self.icon.run, daemon=True).start()
+            log("System tray icon started")
+            return True
+            
+        except Exception as e:
+            err(f"Failed to start system tray: {e}")
+            return False
+
+TRAY = SystemTray()
+
 # --- Settings UI (tkinter, compact) ---
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -290,8 +410,11 @@ from tkinter import ttk, messagebox
 class SettingsUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"{APP} Settings"); self.geometry("520x420")
+        self.title(f"{APP} Settings"); self.geometry("520x450")
         self.resizable(False, False)
+        
+        # Handle window close button to minimize to tray instead of exit
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
         p = ttk.Frame(self, padding=10); p.pack(fill="both", expand=True)
         r = 0
         def add(label, widget):
@@ -414,6 +537,15 @@ class SettingsUI(tk.Tk):
         
         # Footer hint
         ttk.Label(p, text="Tip: Use Paste mode for large blocks; Type mode for apps that block paste.", foreground="#666").grid(row=r, column=0, columnspan=3, pady=6, sticky="w"); r+=1
+        
+        # Tray hint
+        ttk.Label(p, text="💡 Closing this window minimizes to system tray. Right-click tray icon for options.", foreground="#0066CC", font=("TkDefaultFont", 8)).grid(row=r, column=0, columnspan=3, pady=(2,6), sticky="w"); r+=1
+
+    def on_closing(self):
+        """Handle window close button - minimize to tray instead of exit"""
+        log("Settings window closed - app minimized to system tray")
+        self.withdraw()  # Hide the window
+        TRAY.settings_window = None  # Clear reference
 
 # --- App bootstrap ---
 
@@ -443,8 +575,34 @@ def main():
     # First run: write defaults
     if not CFG_PATH.exists(): save_cfg()
     ensure_hotkey()
-    # Settings UI in main thread; hotkeys work globally in the background
-    ui = SettingsUI(); ui.mainloop()
+    
+    # Start system tray
+    tray_started = TRAY.start_tray()
+    if not tray_started:
+        log("Running without system tray support")
+    
+    # Show settings UI initially, then keep app running in background
+    ui = SettingsUI()
+    TRAY.settings_window = ui
+    
+    try:
+        ui.mainloop()  # This will run until window is closed (minimized to tray)
+    except KeyboardInterrupt:
+        pass
+    
+    # If we get here, the settings window was closed
+    # Keep the app running in background with tray icon
+    if tray_started:
+        log("App running in system tray. Right-click tray icon for options.")
+        try:
+            # Keep main thread alive while tray is running
+            while TRAY.icon and TRAY.icon.visible:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            log("Keyboard interrupt - shutting down")
+            TRAY.quit_app()
+    else:
+        log("No system tray - app will exit")
 
 if __name__ == "__main__":
     try:

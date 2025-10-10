@@ -62,7 +62,8 @@ A push-to-talk speech-to-text application using OpenAI's Whisper model that conv
    ```
    pip install -r requirements.txt
    ```
-   - Wait for installation to complete (may take 1-2 minutes)
+   - Wait for installation to complete (may take 2-3 minutes)
+   - Installs: audio processing, OpenAI API, system tray support, and more
    - You should see "Successfully installed..." messages
 
 ### Step 5: Set Up Your OpenAI API Key
@@ -89,10 +90,12 @@ A push-to-talk speech-to-text application using OpenAI's Whisper model that conv
    - If prompted about execution policy, type `Y` and press Enter
    - Follow the on-screen prompts
    - A desktop shortcut will be created
-   - You can get rid of the system windows afterwards
 
 2. **Start Whisper**:
    - **Double-click the "Whisper STT" shortcut** on your desktop
+   - Settings window opens initially for configuration
+   - **Close the settings window** - app continues running in system tray
+   - **Look for the microphone icon** in your system tray (bottom-right corner)
    - The app runs silently in the background (no window appears)
 
 ### Method 2: Manual Launch
@@ -131,6 +134,15 @@ When you run the app for the first time, a settings window will open:
 - **Input Device**: Usually "None" (default microphone) works fine
 
 ## 🎯 How to Use Whisper
+
+### System Tray Operation
+- **Microphone icon** appears in system tray (bottom-right corner of screen)
+- **Green icon** = Whisper is enabled and ready
+- **Red icon** = Whisper is disabled
+- **Right-click the icon** to access menu:
+  - "Open Settings" - Configure the app
+  - "Toggle Enable/Disable" - Turn Whisper on/off
+  - "Exit" - Completely close the application
 
 ### Hotkeys (Global - Work Anywhere)
 - **Ctrl+0**: Record speech (press once to start, again to stop and transcribe)
@@ -243,6 +255,16 @@ When you run the app for the first time, a settings window will open:
 
 3. **Run in debug mode**: Use `run_whisper.bat` to see error messages
 
+4. **Check system tray**: Look for microphone icon in bottom-right corner
+
+### System Tray Issues
+**Problem**: No tray icon appears or tray icon doesn't work
+**Solutions**:
+1. **Check tray dependencies**: Ensure pystray and Pillow installed
+2. **Windows tray settings**: Settings → Personalization → Taskbar → "Select which icons appear on taskbar"
+3. **Run as administrator**: Some systems require elevated permissions for tray icons
+4. **Restart Windows Explorer**: Ctrl+Shift+Esc → Find "Windows Explorer" → Restart
+
 ### API Key Issues
 **Problem**: "Missing API key" or "Authentication failed"
 **Solutions**:
@@ -320,8 +342,8 @@ When you run the app for the first time, a settings window will open:
 ## 📁 File Reference
 
 ### Core Files (Don't Delete!)
-- **`whisper.py`** - Main application code
-- **`requirements.txt`** - List of Python packages needed
+- **`whisper.py`** - Main application code with system tray support
+- **`requirements.txt`** - List of Python packages needed (includes tray dependencies)
 
 ### Launcher Files
 - **`run_whisper_silent.bat`** - Launch app without showing terminal window (recommended)
