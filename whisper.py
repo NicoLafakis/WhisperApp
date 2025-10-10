@@ -5,6 +5,7 @@
 
 import os, io, json, sys, threading, time, wave, queue, ctypes, traceback
 from pathlib import Path
+from typing import Optional
 
 # --- Third‑party deps (install via requirements.txt) ---
 # sounddevice (mic), numpy (buffer/gain), keyboard (global hotkeys & typing), pyperclip (fast paste), openai (API)
@@ -330,14 +331,18 @@ class SystemTray:
         
     def create_menu(self):
         """Create the right-click context menu"""
+        if not pystray:
+            return None
+            
         status_text = "✓ Enabled" if state["enabled"] else "✗ Disabled"
-        return pystray.Menu(
-            pystray.MenuItem(f"Whisper STT - {status_text}", None, enabled=False),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Open Settings", self.show_settings),
-            pystray.MenuItem("Toggle Enable/Disable", self.toggle_whisper),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Exit", self.quit_app)
+        # pylance: disable=reportOptionalMemberAccess
+        return pystray.Menu(  # type: ignore
+            pystray.MenuItem(f"Whisper STT - {status_text}", None, enabled=False),  # type: ignore
+            pystray.Menu.SEPARATOR,  # type: ignore
+            pystray.MenuItem("Open Settings", self.show_settings),  # type: ignore
+            pystray.MenuItem("Toggle Enable/Disable", self.toggle_whisper),  # type: ignore
+            pystray.Menu.SEPARATOR,  # type: ignore
+            pystray.MenuItem("Exit", self.quit_app)  # type: ignore
         )
         
     def show_settings(self, icon=None, item=None):
@@ -360,11 +365,12 @@ class SystemTray:
         
     def update_icon(self):
         """Update the tray icon to reflect current status"""
-        if self.icon:
+        if self.icon and pystray:
             new_image = self.create_icon_image(state["enabled"])
             new_menu = self.create_menu()
-            self.icon.icon = new_image
-            self.icon.menu = new_menu
+            if new_image and new_menu:
+                self.icon.icon = new_image
+                self.icon.menu = new_menu
             
     def quit_app(self, icon=None, item=None):
         """Completely exit the application"""

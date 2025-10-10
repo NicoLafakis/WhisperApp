@@ -2,7 +2,6 @@
 # Run this once to create a desktop shortcut for easy access
 
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
-$pythonScript = Join-Path $scriptPath "whisper.py"
 $batchFile = Join-Path $scriptPath "run_whisper_silent.bat"
 
 # Check if Python is available
