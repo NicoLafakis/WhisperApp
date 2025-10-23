@@ -164,7 +164,14 @@ class SettingsDialog(QDialog):
 
         try:
             from openai import OpenAI
-            client = OpenAI(api_key=api_key)
+            import httpx
+
+            # Create httpx client without proxy to avoid compatibility issues
+            http_client = httpx.Client(
+                timeout=60.0,
+                follow_redirects=True
+            )
+            client = OpenAI(api_key=api_key, http_client=http_client)
 
             # Test by listing models
             client.models.list()
