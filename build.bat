@@ -7,7 +7,7 @@ echo ================================
 echo.
 
 REM Check if Python is installed
-python --version >nul 2>&1
+py --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo ERROR: Python is not installed or not in PATH
     echo Please install Python 3.8+ from https://www.python.org/
@@ -17,7 +17,7 @@ if %errorlevel% neq 0 (
 
 echo Step 1: Creating virtual environment...
 if not exist venv (
-    python -m venv venv
+    py -m venv venv
 )
 
 echo Step 2: Activating virtual environment...
@@ -29,7 +29,7 @@ pip install -r requirements.txt
 pip install Pillow
 
 echo Step 4: Creating application icon...
-python create_icon.py
+py create_icon.py
 
 echo Step 5: Building executable with PyInstaller...
 pyinstaller whisperapp.spec --clean

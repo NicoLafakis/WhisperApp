@@ -51,7 +51,7 @@ If the automatic build script doesn't work, follow these steps:
 
 1. **Create a virtual environment**
    ```bash
-   python -m venv venv
+   py -m venv venv
    ```
 
 2. **Activate the virtual environment**
@@ -61,7 +61,7 @@ If the automatic build script doesn't work, follow these steps:
 
 3. **Upgrade pip**
    ```bash
-   python -m pip install --upgrade pip
+   py -m pip install --upgrade pip
    ```
 
 4. **Install dependencies**
@@ -72,7 +72,7 @@ If the automatic build script doesn't work, follow these steps:
 
 5. **Create the application icon**
    ```bash
-   python create_icon.py
+   py create_icon.py
    ```
 
 6. **Build with PyInstaller**
@@ -85,16 +85,24 @@ If the automatic build script doesn't work, follow these steps:
 
 ## Troubleshooting Build Issues
 
-### "Python is not recognized"
+### "Python is not recognized" or Using `py` Instead of `python`
 
-**Problem**: Python is not in your system PATH
+**Problem**: Python launcher (`py`) works but `python` command doesn't
 
-**Solution**:
-1. Reinstall Python and check "Add Python to PATH"
-2. Or manually add Python to PATH:
-   - Search for "Environment Variables" in Windows
-   - Edit the "Path" variable
-   - Add your Python installation directory
+**Solution**: This is normal on Windows! The build script has been updated to use `py` instead of `python`.
+
+If you still have issues:
+1. Use `py` instead of `python` in all commands:
+   ```bash
+   py -m venv venv
+   py create_icon.py
+   ```
+2. Or add Python to PATH:
+   - Reinstall Python and check "Add Python to PATH"
+   - Or manually add to PATH:
+     - Search for "Environment Variables" in Windows
+     - Edit the "Path" variable
+     - Add: `C:\Users\YourName\AppData\Local\Programs\Python\Python3xx\`
 
 ### "pip is not recognized"
 
@@ -102,9 +110,11 @@ If the automatic build script doesn't work, follow these steps:
 
 **Solution**:
 ```bash
-python -m ensurepip --upgrade
-python -m pip install --upgrade pip
+py -m ensurepip --upgrade
+py -m pip install --upgrade pip
 ```
+
+Or after activating virtual environment, just use `pip` directly (it will be in the venv PATH).
 
 ### PyAudio Installation Fails
 
