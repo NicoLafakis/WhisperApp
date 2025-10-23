@@ -2,6 +2,7 @@
 Transcription service using OpenAI Whisper API
 """
 from openai import OpenAI
+import httpx
 from pathlib import Path
 
 
@@ -9,11 +10,20 @@ class TranscriptionService:
     """Handles transcription using OpenAI Whisper"""
 
     def __init__(self, api_key):
-        self.client = OpenAI(api_key=api_key) if api_key else None
+        self.client = self._create_client(api_key) if api_key else None
+
+    def _create_client(self, api_key):
+        """Create OpenAI client with proper HTTP client configuration"""
+        # Create httpx client without proxy to avoid compatibility issues
+        http_client = httpx.Client(
+            timeout=60.0,
+            follow_redirects=True
+        )
+        return OpenAI(api_key=api_key, http_client=http_client)
 
     def update_api_key(self, api_key):
         """Update the API key"""
-        self.client = OpenAI(api_key=api_key) if api_key else None
+        self.client = self._create_client(api_key) if api_key else None
 
     def transcribe(self, audio_file_path, model="whisper-1", language=None):
         """
