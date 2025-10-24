@@ -16,7 +16,6 @@ from audio_recorder import AudioRecorder
 from transcription_service import TranscriptionService
 from text_inserter import TextInserter
 from settings_dialog import SettingsDialog
-from recording_indicator import RecordingIndicator
 
 
 class TranscriptionWorker(QThread):
@@ -77,9 +76,6 @@ class WhisperApp(QApplication):
         # Setup UI
         self.setup_tray_icon()
         self.setup_hotkeys()
-
-        # Initialize recording indicator
-        self.recording_indicator = RecordingIndicator()
 
         # Show welcome message if API key not configured
         if not self.transcription_service.is_configured():
@@ -182,9 +178,6 @@ class WhisperApp(QApplication):
         self.status_action.setText("Status: Recording...")
         self.audio_recorder.start_recording()
 
-        # Show recording indicator
-        self.recording_indicator.show_recording()
-
         self.show_notification(
             "Recording Started",
             "Speak now... Release keys to transcribe"
@@ -203,12 +196,7 @@ class WhisperApp(QApplication):
         if not audio_file:
             self.status_action.setText("Status: Ready")
             self.show_notification("Error", "No audio recorded")
-            # Hide indicator on error
-            self.recording_indicator.hide_indicator()
             return
-
-        # Update indicator to show transcribing status
-        self.recording_indicator.show_transcribing()
 
         # Start transcription in background thread
         model = self.config_manager.get('model', 'whisper-1')
@@ -230,8 +218,6 @@ class WhisperApp(QApplication):
 
         if not text:
             self.show_notification("Error", "No transcription result")
-            # Hide indicator
-            self.recording_indicator.hide_indicator()
             return
 
         # Insert text or copy to clipboard
@@ -243,9 +229,6 @@ class WhisperApp(QApplication):
         # Try to insert text (which also copies to clipboard)
         self.text_inserter.insert_text(text)
 
-        # Hide indicator after text is inserted
-        self.recording_indicator.hide_indicator()
-
         # Show notification
         if self.config_manager.get('show_notifications', True):
             self.show_notification(
@@ -256,8 +239,6 @@ class WhisperApp(QApplication):
     def on_transcription_error(self, error_msg):
         """Handle transcription error"""
         self.status_action.setText("Status: Ready")
-        # Hide indicator on error
-        self.recording_indicator.hide_indicator()
         self.show_notification("Transcription Error", error_msg)
 
     def show_notification(self, title, message):
@@ -305,7 +286,6 @@ class WhisperApp(QApplication):
     def quit_app(self):
         """Quit the application"""
         self.audio_recorder.cleanup()
-        self.recording_indicator.hide_indicator()
         self.tray_icon.hide()
         self.quit()
 
