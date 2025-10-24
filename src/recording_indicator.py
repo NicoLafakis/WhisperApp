@@ -101,14 +101,23 @@ class RecordingIndicator(QWidget):
     def show_recording(self):
         """Show the indicator for recording"""
         self.status_text = "Recording..."
+        self.rotation = 0  # Reset rotation
         self.show()
-        self.timer.start(50)  # Update every 50ms for smooth animation
+        self.raise_()  # Bring window to front
+        self.activateWindow()  # Activate window
+        if not self.timer.isActive():
+            self.timer.start(50)  # Update every 50ms for smooth animation
 
     def show_transcribing(self):
         """Update indicator to show transcribing status"""
         self.status_text = "Transcribing..."
+        # Ensure timer is still running
+        if not self.timer.isActive():
+            self.timer.start(50)
+        self.update()  # Force repaint with new text
 
     def hide_indicator(self):
         """Hide the indicator"""
         self.timer.stop()
+        self.rotation = 0  # Reset rotation for next time
         self.hide()
