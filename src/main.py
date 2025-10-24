@@ -148,7 +148,10 @@ class WhisperApp(QApplication):
         try:
             # Register hotkey for press and release
             keyboard.on_press_key('space', self.on_hotkey_press, suppress=False)
+            # Monitor all three keys for release to ensure recording stops when any key is released
             keyboard.on_release_key('space', self.on_hotkey_release, suppress=False)
+            keyboard.on_release_key('ctrl', self.on_hotkey_release, suppress=False)
+            keyboard.on_release_key('shift', self.on_hotkey_release, suppress=False)
         except Exception as e:
             print(f"Error setting up hotkeys: {e}")
 
@@ -160,9 +163,11 @@ class WhisperApp(QApplication):
                 self.start_recording()
 
     def on_hotkey_release(self, event):
-        """Handle hotkey release - stop recording"""
+        """Handle hotkey release - stop recording when any of the keys is released"""
         if self.is_recording:
-            self.stop_recording()
+            # Stop recording if any of the required keys is no longer pressed
+            if not (keyboard.is_pressed('ctrl') and keyboard.is_pressed('shift') and keyboard.is_pressed('space')):
+                self.stop_recording()
 
     def start_recording(self):
         """Start recording audio"""
