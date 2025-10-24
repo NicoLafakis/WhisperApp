@@ -35,26 +35,25 @@ class TranscriptionService:
             language: Language code (e.g., 'en', 'es', 'fr')
 
         Returns:
-            Transcribed text or None if error
+            Transcribed text
+
+        Raises:
+            Exception: If transcription fails
         """
         if not self.client:
-            return "Error: API key not configured"
+            raise Exception("API key not configured")
 
-        try:
-            with open(audio_file_path, 'rb') as audio_file:
-                params = {
-                    "model": model,
-                    "file": audio_file,
-                }
+        with open(audio_file_path, 'rb') as audio_file:
+            params = {
+                "model": model,
+                "file": audio_file,
+            }
 
-                if language:
-                    params["language"] = language
+            if language:
+                params["language"] = language
 
-                transcript = self.client.audio.transcriptions.create(**params)
-                return transcript.text.strip()
-        except Exception as e:
-            print(f"Transcription error: {e}")
-            return f"Error: {str(e)}"
+            transcript = self.client.audio.transcriptions.create(**params)
+            return transcript.text.strip()
 
     def is_configured(self):
         """Check if API key is configured"""
