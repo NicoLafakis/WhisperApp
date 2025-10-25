@@ -56,7 +56,16 @@ class ConfigManager:
             'api_key': '',
             'model': 'whisper-1',
             'language': 'en',
-            'hotkey': 'ctrl+shift+space',
+            'hotkey': 'ctrl+shift+space',  # Legacy support
+            'hotkeys': {
+                'push_to_talk': 'ctrl+shift+space',
+                'toggle_voice_commands': 'ctrl+shift+v'
+            },
+            'voice_commands': {
+                'enabled': False,
+                'show_notifications': True,
+                'sensitivity': 'medium'  # low, medium, high
+            },
             'auto_copy': True,
             'show_notifications': True,
             'audio_device': 'default'
@@ -107,3 +116,31 @@ class ConfigManager:
     def set_api_key(self, api_key):
         """Set OpenAI API key"""
         self.set('api_key', api_key)
+
+    def get_hotkey(self, hotkey_name):
+        """Get a specific hotkey configuration"""
+        hotkeys = self.config.get('hotkeys', {})
+        return hotkeys.get(hotkey_name, '')
+
+    def set_hotkey(self, hotkey_name, hotkey_value):
+        """Set a specific hotkey configuration"""
+        if 'hotkeys' not in self.config:
+            self.config['hotkeys'] = {}
+        self.config['hotkeys'][hotkey_name] = hotkey_value
+        self.save_config()
+
+    def get_voice_command_setting(self, setting_name, default=None):
+        """Get a voice command setting"""
+        voice_commands = self.config.get('voice_commands', {})
+        return voice_commands.get(setting_name, default)
+
+    def set_voice_command_setting(self, setting_name, value):
+        """Set a voice command setting"""
+        if 'voice_commands' not in self.config:
+            self.config['voice_commands'] = {}
+        self.config['voice_commands'][setting_name] = value
+        self.save_config()
+
+    def is_voice_commands_enabled(self):
+        """Check if voice commands are enabled"""
+        return self.get_voice_command_setting('enabled', False)

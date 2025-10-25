@@ -5,9 +5,13 @@ A Windows 11 desktop application for push-to-talk transcription using OpenAI's W
 ## Features
 
 - **Push-to-Talk**: Hold `Ctrl+Shift+Space` to record, release to transcribe
+- **Voice-Activated Navigation**: Control window positioning with voice commands (e.g., "Monitor one, quadrant one")
+- **Customizable Hotkeys**: Configure your own keyboard shortcuts for push-to-talk and voice command toggle
 - **Smart Text Insertion**: Automatically inserts transcribed text into the active text field
+- **Multi-Monitor Support**: Move and organize windows across multiple monitors with voice commands
+- **Quadrant Layout**: Organize windows into 4 quadrants per monitor for efficient screen management
 - **Clipboard Fallback**: If no text field is active, copies to clipboard with notification
-- **System Tray Integration**: Runs quietly in the background
+- **System Tray Integration**: Runs quietly in the background with easy access to features
 - **Secure Settings**: Encrypted API key storage
 - **Multi-language Support**: Supports multiple languages including English, Spanish, French, German, and more
 - **Windows 11 Native**: Built specifically for Windows 11
@@ -58,16 +62,47 @@ A Windows 11 desktop application for push-to-talk transcription using OpenAI's W
 2. Right-click the system tray icon
 3. Select "Settings"
 4. Enter your OpenAI API key
-5. (Optional) Adjust other settings like language preference
-6. Click "Save"
+5. (Optional) Adjust other settings like language preference and hotkeys
+6. (Optional) Enable voice commands for window navigation
+7. Click "Save"
 
-### Using the App
+### Push-to-Talk Transcription
 
 1. Click on any text field (Word, Notepad, browser, etc.)
-2. Press and hold `Ctrl+Shift+Space`
+2. Press and hold `Ctrl+Shift+Space` (or your custom hotkey)
 3. Speak while holding the keys
 4. Release the keys when done speaking
 5. The transcribed text will be automatically inserted at your cursor
+
+### Voice-Activated Navigation
+
+Enable voice commands from the system tray menu or settings:
+
+1. Right-click the system tray icon
+2. Click "Enable Voice Commands" (or use `Ctrl+Shift+V`)
+3. Say a command like:
+   - "Monitor one, quadrant one" - Move active window to monitor 1, top-left
+   - "Monitor two, quadrant four" - Move active window to monitor 2, bottom-right
+   - "Screen one, top right" - Move active window to monitor 1, top-right
+
+#### Quadrant Layout
+
+Each monitor is divided into 4 quadrants:
+
+```
++-----+-----+
+|  1  |  2  |  (Top)
++-----+-----+
+|  3  |  4  |  (Bottom)
++-----+-----+
+ Left Right
+```
+
+#### Supported Voice Commands
+
+- "Monitor [1-9], quadrant [1-4]"
+- "Screen [1-9], quadrant [1-4]"
+- "Monitor [1-9], [top/bottom] [left/right]"
 
 ### If No Text Field is Active
 
@@ -78,21 +113,31 @@ If you're not in a text field:
 
 ## Settings
 
-### API Configuration
+The settings dialog is now organized into tabs for easy access:
+
+### API Settings Tab
 
 - **API Key**: Your OpenAI API key (required)
 - **Model**: Whisper model to use (currently whisper-1)
 - **Language**: Target language for transcription (or auto-detect)
 
-### Behavior
+### Hotkeys Tab
+
+- **Push-to-Talk Hotkey**: Customize the keyboard shortcut for recording (default: `Ctrl+Shift+Space`)
+- **Voice Command Toggle Hotkey**: Customize the shortcut to enable/disable voice commands (default: `Ctrl+Shift+V`)
+- **Record Hotkey**: Click to easily capture a new key combination
+
+### Voice Commands Tab
+
+- **Enable Voice Navigation**: Toggle voice-activated window control
+- **Show Notifications**: Display notifications when voice commands are executed
+- **Sensitivity**: Adjust voice recognition sensitivity (Low, Medium, High)
+- **Available Commands**: View list of supported voice commands
+
+### Behavior Tab
 
 - **Automatically copy to clipboard**: Always copy transcriptions to clipboard
-- **Show notifications**: Display notifications when transcription is complete
-
-### Hotkey
-
-- Default: `Ctrl+Shift+Space`
-- Customization coming in future updates
+- **Show transcription notifications**: Display notifications when transcription is complete
 
 ## Troubleshooting
 
@@ -145,19 +190,24 @@ WhisperApp is free and open source. However, you'll need an OpenAI API account:
 ```
 WhisperApp/
 ├── src/
-│   ├── main.py                 # Main application
-│   ├── config_manager.py       # Settings management
-│   ├── audio_recorder.py       # Audio recording
-│   ├── transcription_service.py # OpenAI API integration
-│   ├── text_inserter.py        # Text insertion logic
-│   └── settings_dialog.py      # Settings UI
+│   ├── main.py                      # Main application
+│   ├── config_manager.py            # Settings management
+│   ├── audio_recorder.py            # Audio recording
+│   ├── transcription_service.py     # OpenAI API integration
+│   ├── text_inserter.py             # Text insertion logic
+│   ├── settings_dialog.py           # Settings UI (tabbed)
+│   ├── hotkey_manager.py            # Hotkey registration/management
+│   ├── window_manager.py            # Window positioning and monitor detection
+│   ├── command_parser.py            # Voice command parsing
+│   ├── voice_command_listener.py    # Continuous voice listening
+│   └── recording_indicator.py       # Visual recording feedback
 ├── assets/
-│   ├── icon.png                # App icon (PNG)
-│   └── icon.ico                # App icon (ICO)
-├── requirements.txt            # Python dependencies
-├── whisperapp.spec            # PyInstaller configuration
-├── build.bat                   # Windows build script
-└── README.md                   # This file
+│   ├── icon.png                     # App icon (PNG)
+│   └── icon.ico                     # App icon (ICO)
+├── requirements.txt                 # Python dependencies
+├── whisperapp.spec                  # PyInstaller configuration
+├── build.bat                        # Windows build script
+└── README.md                        # This file
 ```
 
 ### Running in Development Mode
@@ -201,15 +251,27 @@ If you encounter any issues or have questions:
 
 ## Roadmap
 
-- [ ] Custom hotkey configuration
+- [x] Custom hotkey configuration
+- [x] Voice commands for window navigation
+- [x] Multi-monitor support
 - [ ] Multiple language models
 - [ ] Local Whisper model support (no API required)
 - [ ] History of transcriptions
 - [ ] Export transcriptions
-- [ ] Voice commands
 - [ ] Custom wake word
+- [ ] Additional voice commands (minimize, maximize, close windows)
+- [ ] Voice command macros
 
 ## Version History
+
+### v2.0.0 (2025-10-25)
+- Added voice-activated navigation for window control
+- Added customizable hotkeys for all functions
+- Added multi-monitor support with quadrant layout
+- Added tabbed settings interface
+- Enhanced voice command system with continuous listening
+- Improved hotkey management system
+- Added voice command sensitivity settings
 
 ### v1.0.0 (2025-10-23)
 - Initial release
