@@ -1,8 +1,18 @@
 """
 Voice Command Listener for WhisperApp
 Continuously listens for voice commands using speech recognition
+
+NOTE: This module requires speech_recognition which depends on deprecated
+modules (aifc, audioop) that were removed in Python 3.13+.
+For Python 3.13+, use WhisperVoiceListener instead.
 """
-import speech_recognition as sr
+try:
+    import speech_recognition as sr
+    SPEECH_RECOGNITION_AVAILABLE = True
+except ImportError:
+    SPEECH_RECOGNITION_AVAILABLE = False
+    sr = None
+
 from PyQt5.QtCore import QThread, pyqtSignal
 import time
 from typing import Callable, Optional
@@ -23,8 +33,20 @@ class VoiceCommandListener(QThread):
         Args:
             sensitivity: Recognition sensitivity ('low', 'medium', 'high')
             language: Language code for recognition (default: 'en-US')
+
+        Raises:
+            ImportError: If speech_recognition is not available (Python 3.13+)
         """
         super().__init__()
+
+        if not SPEECH_RECOGNITION_AVAILABLE:
+            raise ImportError(
+                "speech_recognition library is not available. "
+                "This library depends on deprecated modules (aifc, audioop) "
+                "that were removed in Python 3.13+. "
+                "Please use WhisperVoiceListener instead."
+            )
+
         self.recognizer = sr.Recognizer()
         self.microphone = None
         self.is_listening = False
@@ -158,6 +180,10 @@ class VoiceCommandListenerOffline(QThread):
         Args:
             model_path: Path to Vosk model (if None, will try to use default)
             sensitivity: Recognition sensitivity
+
+        Note:
+            This is an alternative offline implementation using Vosk.
+            Vosk does not depend on the deprecated audio modules.
         """
         super().__init__()
         self.model_path = model_path
