@@ -1,32 +1,58 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
+
+# Collect all speech_recognition submodules and data
+datas = []
+binaries = []
+hiddenimports = []
+
+# Collect speech_recognition package completely
+tmp_ret = collect_all('speech_recognition')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 a = Analysis(
     ['src/main.py'],
     pathex=['src'],
-    binaries=[],
-    datas=[
+    binaries=binaries,
+    datas=datas + [
         ('assets/icon.png', 'assets'),
         ('assets/icon.ico', 'assets'),
     ],
-    hiddenimports=[
+    hiddenimports=hiddenimports + [
         'PyQt5',
+        'PyQt5.QtCore',
+        'PyQt5.QtGui',
+        'PyQt5.QtWidgets',
         'openai',
         'pyaudio',
         'keyboard',
         'pyperclip',
         'pynput',
+        'pynput.keyboard',
+        'pynput.mouse',
         'plyer',
         'cryptography',
         'speech_recognition',
+        # Audio modules (deprecated but still needed in Python 3.11)
         'aifc',
         'audioop',
         'wave',
+        'sndhdr',
+        'chunk',
+        'sunau',
+        # PyQt5 submodules
+        'PyQt5.sip',
+        # System modules
+        'comtypes',
+        'pycaw',
+        'psutil',
+        'vosk',
     ],
-    hookspath=[],
+    hookspath=['hooks'],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['hooks/runtime-hook-aifc.py'],
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
