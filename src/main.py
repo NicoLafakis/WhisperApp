@@ -16,9 +16,6 @@ from audio_recorder import AudioRecorder
 from transcription_service import TranscriptionService
 from text_inserter import TextInserter
 from settings_dialog import SettingsDialog
-<<<<<<< HEAD
-=======
-from recording_indicator import RecordingIndicator
 from hotkey_manager import HotkeyManager
 from window_manager import WindowManager
 from command_parser import CommandParser
@@ -28,7 +25,6 @@ from automation_controller import AutomationController
 from audio_controller import AudioController
 from clipboard_controller import ClipboardController
 from file_controller import FileController
->>>>>>> 3659bcb84bcc7d1bd1ef35b2e82261f96a41e4ff
 
 
 class TranscriptionWorker(QThread):
@@ -672,11 +668,7 @@ class WhisperApp(QApplication):
             self.stop_voice_commands()
 
         self.audio_recorder.cleanup()
-<<<<<<< HEAD
-=======
-        self.recording_indicator.hide_indicator()
         self.hotkey_manager.unregister_all()
->>>>>>> 3659bcb84bcc7d1bd1ef35b2e82261f96a41e4ff
         self.tray_icon.hide()
         self.quit()
 
