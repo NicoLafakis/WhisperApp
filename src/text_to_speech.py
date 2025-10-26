@@ -219,9 +219,7 @@ class AudioPlayer(QThread):
 
     def _play_mp3_file(self, mp3_file: str):
         """
-        Play MP3 file using PyAudio
-        Note: This requires conversion or a library like pydub
-        For now, we'll use a simple approach with pygame or similar
+        Play MP3 file using pygame (Windows 11 optimized)
 
         Args:
             mp3_file: Path to MP3 file
@@ -230,8 +228,14 @@ class AudioPlayer(QThread):
             # Import pygame for MP3 playback
             import pygame
 
-            # Initialize pygame mixer
-            pygame.mixer.init()
+            # Initialize pygame mixer with Windows-optimized settings
+            # frequency=44100, size=-16, channels=2, buffer=2048
+            try:
+                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
+            except pygame.error as e:
+                # Try with default settings if optimized settings fail
+                print(f"Pygame mixer init with custom settings failed: {e}, trying defaults")
+                pygame.mixer.init()
 
             # Load and play
             pygame.mixer.music.load(mp3_file)
@@ -241,15 +245,21 @@ class AudioPlayer(QThread):
             while pygame.mixer.music.get_busy() and self.is_playing:
                 time.sleep(0.1)
 
+            # Clean stop
             pygame.mixer.music.stop()
             pygame.mixer.quit()
 
-        except ImportError:
+        except ImportError as e:
+            print(f"Pygame not available: {e}")
             # Fallback: Try using Windows Media Player COM object
             self._play_with_windows_media_player(mp3_file)
         except Exception as e:
             print(f"MP3 playback error: {e}")
-            raise
+            # Try fallback before failing
+            try:
+                self._play_with_windows_media_player(mp3_file)
+            except:
+                raise  # Raise original exception if fallback also fails
 
     def _play_with_windows_media_player(self, audio_file: str):
         """

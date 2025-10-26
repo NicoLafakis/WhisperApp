@@ -5,6 +5,11 @@ Maps to existing controller capabilities
 """
 import json
 from typing import Dict, List, Any, Callable, Optional
+from pathlib import Path
+from datetime import datetime
+import win32gui
+import win32process
+import psutil
 
 
 class FunctionRegistry:
@@ -633,17 +638,19 @@ class FunctionRegistry:
     def _handle_launch_application(self, args: Dict[str, Any]) -> Dict[str, Any]:
         app_name = args.get("app_name", "")
         arguments = args.get("arguments", [])
-        success = self.app_controller.launch_app(app_name, arguments)
+        # Convert list arguments to string if needed
+        args_str = " ".join(arguments) if isinstance(arguments, list) else str(arguments)
+        success = self.app_controller.launch_application(app_name, args_str if args_str else "")
         return {"success": success, "app_name": app_name}
 
     def _handle_switch_to_application(self, args: Dict[str, Any]) -> Dict[str, Any]:
         app_name = args.get("app_name", "")
-        success = self.app_controller.switch_to_app(app_name)
+        success = self.app_controller.switch_to_application(app_name)
         return {"success": success, "app_name": app_name}
 
     def _handle_close_application(self, args: Dict[str, Any]) -> Dict[str, Any]:
         app_name = args.get("app_name", "")
-        success = self.app_controller.close_app(app_name)
+        success = self.app_controller.close_application(app_name, force=False)
         return {"success": success, "app_name": app_name}
 
     def _handle_get_running_applications(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -682,17 +689,17 @@ class FunctionRegistry:
     # System Control Handlers
     def _handle_set_volume(self, args: Dict[str, Any]) -> Dict[str, Any]:
         level = args.get("level", 50)
-        success = self.audio_controller.set_volume(level)
+        success = self.audio_controller.set_master_volume(level)
         return {"success": success, "level": level}
 
     def _handle_volume_up(self, args: Dict[str, Any]) -> Dict[str, Any]:
         success = self.audio_controller.volume_up()
-        new_level = self.audio_controller.get_volume()
+        new_level = self.audio_controller.get_master_volume()
         return {"success": success, "new_level": int(new_level)}
 
     def _handle_volume_down(self, args: Dict[str, Any]) -> Dict[str, Any]:
         success = self.audio_controller.volume_down()
-        new_level = self.audio_controller.get_volume()
+        new_level = self.audio_controller.get_master_volume()
         return {"success": success, "new_level": int(new_level)}
 
     def _handle_mute(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -709,7 +716,7 @@ class FunctionRegistry:
         return {"success": success, "muted": is_muted}
 
     def _handle_get_volume(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        level = self.audio_controller.get_volume()
+        level = self.audio_controller.get_master_volume()
         return {"success": True, "level": int(level)}
 
     # Automation Handlers
@@ -756,7 +763,8 @@ class FunctionRegistry:
     def _handle_search_files(self, args: Dict[str, Any]) -> Dict[str, Any]:
         query = args.get("query", "")
         directory = args.get("directory", str(Path.home()))
-        results = self.file_controller.search_files(query, directory)
+        # Use find_files with the query as the pattern
+        results = self.file_controller.find_files(directory, pattern=query, recursive=True)
         return {"success": True, "results": results[:10]}  # Limit to 10 results
 
     def _handle_open_file(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -771,11 +779,12 @@ class FunctionRegistry:
         return {"success": success}
 
     def _handle_get_clipboard(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        text = self.clipboard_controller.get_clipboard_text()
-        return {"success": True, "text": text}
+        text = self.clipboard_controller.paste_text()
+        return {"success": text is not None, "text": text if text else ""}
 
     def _handle_paste_from_clipboard(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        success = self.clipboard_controller.paste()
+        # Trigger a paste action using automation controller
+        success = self.automation_controller.paste()
         return {"success": success}
 
     # Information Handlers

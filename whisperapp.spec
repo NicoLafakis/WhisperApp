@@ -3,14 +3,17 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
 
-# Collect all speech_recognition submodules and data
+# Collect data and binaries
 datas = []
 binaries = []
 hiddenimports = []
 
-# Collect speech_recognition package completely
-tmp_ret = collect_all('speech_recognition')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# Collect pygame for audio playback
+try:
+    tmp_ret = collect_all('pygame')
+    datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+except:
+    print("Warning: pygame not found, TTS audio playback may not work")
 
 a = Analysis(
     ['src/main.py'],
@@ -21,34 +24,52 @@ a = Analysis(
         ('assets/icon.ico', 'assets'),
     ],
     hiddenimports=hiddenimports + [
+        # PyQt5
         'PyQt5',
         'PyQt5.QtCore',
         'PyQt5.QtGui',
         'PyQt5.QtWidgets',
+        'PyQt5.sip',
+        # OpenAI
         'openai',
+        'openai.types',
+        'openai.types.audio',
+        'openai.types.chat',
+        # Audio
         'pyaudio',
+        'pygame',
+        'pygame.mixer',
+        # Keyboard/Mouse
         'keyboard',
         'pyperclip',
         'pynput',
         'pynput.keyboard',
         'pynput.mouse',
+        # Notifications
         'plyer',
+        # Encryption
         'cryptography',
-        'speech_recognition',
-        # Audio modules (deprecated but still needed in Python 3.11)
-        'aifc',
-        'audioop',
+        'cryptography.fernet',
+        # Audio modules for legacy compatibility
         'wave',
-        'sndhdr',
-        'chunk',
-        'sunau',
-        # PyQt5 submodules
-        'PyQt5.sip',
+        # Numeric processing
+        'numpy',
+        'numpy.core',
+        'numpy.core._multiarray_umath',
         # System modules
         'comtypes',
         'pycaw',
         'psutil',
-        'vosk',
+        'win32api',
+        'win32con',
+        'win32gui',
+        'win32process',
+        # JARVIS modules
+        'whisper_voice_listener',
+        'natural_language_processor',
+        'function_registry',
+        'text_to_speech',
+        'conversation_manager',
     ],
     hookspath=['hooks'],
     hooksconfig={},

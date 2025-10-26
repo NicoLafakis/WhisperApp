@@ -108,10 +108,10 @@ class WhisperApp(QApplication):
 
         # Get JARVIS settings from config (with defaults)
         jarvis_config = self.config_manager.get('jarvis', {})
-        nlu_model = jarvis_config.get('model', 'gpt-4o-mini')
+        nlu_model = jarvis_config.get('model', 'gpt-4o-mini')  # Production-ready model
         verbosity = jarvis_config.get('response_verbosity', 'balanced')
-        tts_voice = jarvis_config.get('voice', 'alloy')
-        tts_model = jarvis_config.get('tts_model', 'tts-1')
+        tts_voice = jarvis_config.get('voice', 'onyx')  # Deep, authoritative voice perfect for JARVIS
+        tts_model = jarvis_config.get('tts_model', 'tts-1-hd')  # High-definition quality
         tts_speed = jarvis_config.get('speaking_speed', 1.0)
 
         self.nlu_processor = NaturalLanguageProcessor(

@@ -159,8 +159,8 @@ JARVIS: "Okay."
   "jarvis": {
     "enabled": true,
     "model": "gpt-4o-mini",
-    "voice": "alloy",
-    "tts_model": "tts-1",
+    "voice": "onyx",
+    "tts_model": "tts-1-hd",
     "speaking_speed": 1.0,
     "response_verbosity": "balanced",
     "context_length": 20,
@@ -177,10 +177,10 @@ JARVIS: "Okay."
 
 ### Available Voices
 
-- **alloy**: Neutral, balanced voice (default)
+- **alloy**: Neutral, balanced voice
 - **echo**: Warm, male-sounding voice
 - **fable**: Expressive, whimsical voice
-- **onyx**: Deep, authoritative male voice (recommended for JARVIS)
+- **onyx**: Deep, authoritative male voice (default - perfect for JARVIS!)
 - **nova**: Friendly, energetic female voice
 - **shimmer**: Soft, gentle female voice
 
