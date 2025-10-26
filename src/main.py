@@ -16,6 +16,19 @@ from audio_recorder import AudioRecorder
 from transcription_service import TranscriptionService
 from text_inserter import TextInserter
 from settings_dialog import SettingsDialog
+<<<<<<< HEAD
+=======
+from recording_indicator import RecordingIndicator
+from hotkey_manager import HotkeyManager
+from window_manager import WindowManager
+from command_parser import CommandParser
+from voice_command_listener import VoiceCommandListener
+from application_controller import ApplicationController
+from automation_controller import AutomationController
+from audio_controller import AudioController
+from clipboard_controller import ClipboardController
+from file_controller import FileController
+>>>>>>> 3659bcb84bcc7d1bd1ef35b2e82261f96a41e4ff
 
 
 class TranscriptionWorker(QThread):
@@ -58,6 +71,17 @@ class WhisperApp(QApplication):
         self.config_manager = ConfigManager()
         self.audio_recorder = AudioRecorder()
         self.text_inserter = TextInserter()
+        self.hotkey_manager = HotkeyManager()
+        self.window_manager = WindowManager()
+        self.command_parser = CommandParser()
+        self.voice_listener = None
+
+        # Initialize new controllers
+        self.app_controller = ApplicationController()
+        self.automation_controller = AutomationController()
+        self.audio_controller = AudioController()
+        self.clipboard_controller = ClipboardController()
+        self.file_controller = FileController()
 
         # Initialize transcription service with API key
         api_key = self.config_manager.get_api_key()
@@ -81,6 +105,10 @@ class WhisperApp(QApplication):
         if not self.transcription_service.is_configured():
             self.show_welcome_message()
 
+        # Start voice commands if enabled
+        if self.config_manager.is_voice_commands_enabled():
+            self.start_voice_commands()
+
     def setup_tray_icon(self):
         """Setup system tray icon and menu"""
         # Create tray icon
@@ -93,6 +121,14 @@ class WhisperApp(QApplication):
         # Status action
         self.status_action = menu.addAction("Status: Ready")
         self.status_action.setEnabled(False)
+
+        menu.addSeparator()
+
+        # Voice commands toggle action
+        self.voice_commands_action = menu.addAction("Enable Voice Commands")
+        self.voice_commands_action.setCheckable(True)
+        self.voice_commands_action.setChecked(self.config_manager.is_voice_commands_enabled())
+        self.voice_commands_action.triggered.connect(self.on_voice_commands_menu_toggled)
 
         menu.addSeparator()
 
@@ -121,6 +157,17 @@ class WhisperApp(QApplication):
             2000
         )
 
+    def on_voice_commands_menu_toggled(self, checked):
+        """Handle voice commands menu toggle"""
+        self.config_manager.set_voice_command_setting('enabled', checked)
+
+        if checked:
+            self.voice_commands_action.setText("Disable Voice Commands")
+            self.start_voice_commands()
+        else:
+            self.voice_commands_action.setText("Enable Voice Commands")
+            self.stop_voice_commands()
+
     def get_icon_path(self):
         """Get path to application icon"""
         if getattr(sys, 'frozen', False):
@@ -139,31 +186,362 @@ class WhisperApp(QApplication):
 
     def setup_hotkeys(self):
         """Setup global hotkeys"""
-        hotkey = self.config_manager.get('hotkey', 'ctrl+shift+space')
+        # Get hotkey from new hotkeys structure, fallback to legacy hotkey config
+        hotkey = self.config_manager.get_hotkey('push_to_talk')
+        if not hotkey:
+            hotkey = self.config_manager.get('hotkey', 'ctrl+shift+space')
 
         try:
-            # Register hotkey for press and release
-            keyboard.on_press_key('space', self.on_hotkey_press, suppress=False)
-            # Monitor all three keys for release to ensure recording stops when any key is released
-            keyboard.on_release_key('space', self.on_hotkey_release, suppress=False)
-            keyboard.on_release_key('ctrl', self.on_hotkey_release, suppress=False)
-            keyboard.on_release_key('shift', self.on_hotkey_release, suppress=False)
+            # Register push-to-talk hotkey
+            self.hotkey_manager.register_push_to_talk(
+                hotkey,
+                self.on_push_to_talk_press,
+                self.on_push_to_talk_release
+            )
+
+            # Register voice command toggle hotkey
+            voice_cmd_hotkey = self.config_manager.get_hotkey('toggle_voice_commands')
+            if voice_cmd_hotkey:
+                self.hotkey_manager.register_hotkey(
+                    voice_cmd_hotkey,
+                    self.toggle_voice_commands
+                )
+
         except Exception as e:
             print(f"Error setting up hotkeys: {e}")
 
-    def on_hotkey_press(self, event):
-        """Handle hotkey press - start recording"""
-        # Check if Ctrl+Shift are held
-        if keyboard.is_pressed('ctrl') and keyboard.is_pressed('shift'):
-            if not self.is_recording:
-                self.start_recording()
+    def on_push_to_talk_press(self):
+        """Handle push-to-talk press - start recording"""
+        if not self.is_recording:
+            self.start_recording()
 
-    def on_hotkey_release(self, event):
-        """Handle hotkey release - stop recording when any of the keys is released"""
+    def on_push_to_talk_release(self):
+        """Handle push-to-talk release - stop recording"""
         if self.is_recording:
-            # Stop recording if any of the required keys is no longer pressed
-            if not (keyboard.is_pressed('ctrl') and keyboard.is_pressed('shift') and keyboard.is_pressed('space')):
-                self.stop_recording()
+            self.stop_recording()
+
+    def toggle_voice_commands(self):
+        """Toggle voice commands on/off"""
+        current_state = self.config_manager.is_voice_commands_enabled()
+        new_state = not current_state
+        self.config_manager.set_voice_command_setting('enabled', new_state)
+
+        if new_state:
+            self.start_voice_commands()
+        else:
+            self.stop_voice_commands()
+
+    def start_voice_commands(self):
+        """Start voice command listening"""
+        if self.voice_listener and self.voice_listener.is_active():
+            return  # Already running
+
+        try:
+            # Get settings
+            sensitivity = self.config_manager.get_voice_command_setting('sensitivity', 'medium')
+            language = self.config_manager.get('language', 'en')
+
+            # Map language code to speech recognition format
+            lang_map = {
+                'en': 'en-US',
+                'es': 'es-ES',
+                'fr': 'fr-FR',
+                'de': 'de-DE',
+                'it': 'it-IT',
+                'pt': 'pt-PT',
+                'ru': 'ru-RU',
+                'ja': 'ja-JP',
+                'ko': 'ko-KR',
+                'zh': 'zh-CN',
+            }
+            sr_language = lang_map.get(language, 'en-US')
+
+            # Create and start listener
+            self.voice_listener = VoiceCommandListener(sensitivity, sr_language)
+            self.voice_listener.command_detected.connect(self.on_voice_command_detected)
+            self.voice_listener.error_occurred.connect(self.on_voice_command_error)
+            self.voice_listener.status_changed.connect(self.on_voice_command_status)
+            self.voice_listener.start()
+
+            self.show_notification(
+                "Voice Commands Enabled",
+                "Voice navigation is now active"
+            )
+
+        except Exception as e:
+            print(f"Error starting voice commands: {e}")
+            self.show_notification(
+                "Voice Command Error",
+                f"Failed to start: {e}"
+            )
+
+    def stop_voice_commands(self):
+        """Stop voice command listening"""
+        if self.voice_listener:
+            self.voice_listener.stop_listening()
+            self.voice_listener.wait(2000)  # Wait up to 2 seconds for thread to finish
+            self.voice_listener = None
+
+        self.show_notification(
+            "Voice Commands Disabled",
+            "Voice navigation is now inactive"
+        )
+
+    def on_voice_command_detected(self, text: str):
+        """Handle detected voice command"""
+        print(f"Voice command detected: {text}")
+
+        # Parse the command
+        command = self.command_parser.parse(text)
+
+        if not command:
+            # Not a valid command
+            print(f"Not a recognized command: {text}")
+            return
+
+        # Execute command
+        success = self.execute_voice_command(command)
+
+        # Show notification if enabled
+        if success and self.config_manager.get_voice_command_setting('show_notifications', True):
+            action_desc = self._get_command_description(command)
+            self.show_notification("Command Executed", action_desc)
+
+    def _get_command_description(self, command) -> str:
+        """Get a human-readable description of the command"""
+        category = command.category
+        action = command.action
+
+        if category == 'window':
+            if action == 'move_window':
+                return f"Moved window to monitor {command.monitor}, quadrant {command.quadrant}"
+            else:
+                return f"Window: {action.replace('_', ' ').title()}"
+        elif category == 'application':
+            if command.app_name:
+                return f"{action.replace('_', ' ').title()}: {command.app_name}"
+            elif command.app_url:
+                return f"Opened: {command.app_url}"
+        elif category == 'audio':
+            if command.volume_level is not None:
+                return f"Volume set to {command.volume_level}%"
+            else:
+                return f"Audio: {action.replace('_', ' ').title()}"
+        elif category in ['keyboard', 'mouse']:
+            return f"{category.title()}: {action.replace('_', ' ').title()}"
+        elif category == 'file':
+            if command.folder_name:
+                return f"{action.replace('_', ' ').title()}: {command.folder_name}"
+            return f"File: {action.replace('_', ' ').title()}"
+        elif category == 'clipboard':
+            return f"Clipboard: {action.replace('_', ' ').title()}"
+
+        return "Command executed successfully"
+
+    def execute_voice_command(self, command) -> bool:
+        """Execute a parsed voice command"""
+        try:
+            category = command.category
+            action = command.action
+
+            # Window Navigation & Operations
+            if category == 'window':
+                return self._execute_window_command(command)
+
+            # Application Operations
+            elif category == 'application':
+                return self._execute_app_command(command)
+
+            # Audio Operations
+            elif category == 'audio':
+                return self._execute_audio_command(command)
+
+            # Keyboard Operations
+            elif category == 'keyboard':
+                return self._execute_keyboard_command(command)
+
+            # Mouse Operations
+            elif category == 'mouse':
+                return self._execute_mouse_command(command)
+
+            # File Operations
+            elif category == 'file':
+                return self._execute_file_command(command)
+
+            # Clipboard Operations
+            elif category == 'clipboard':
+                return self._execute_clipboard_command(command)
+
+            else:
+                print(f"Unknown command category: {category}")
+                return False
+
+        except Exception as e:
+            print(f"Error executing command: {e}")
+            self.show_notification("Command Error", f"Failed to execute: {e}")
+            return False
+
+    def _execute_window_command(self, command) -> bool:
+        """Execute window-related commands"""
+        action = command.action
+
+        if action == 'move_window':
+            return self.window_manager.move_window_to_quadrant(
+                command.monitor,
+                command.quadrant
+            )
+        elif action == 'minimize_window':
+            return self.window_manager.minimize_window()
+        elif action == 'maximize_window':
+            return self.window_manager.maximize_window()
+        elif action == 'close_window':
+            return self.window_manager.close_window()
+        elif action == 'restore_window':
+            return self.window_manager.restore_window()
+        elif action == 'center_window':
+            return self.window_manager.center_window()
+        elif action == 'snap_window':
+            position = command.parameters.get('position', 'left')
+            return self.window_manager.snap_window(position=position)
+        elif action == 'next_monitor':
+            return self.window_manager.move_to_next_monitor()
+        elif action == 'always_on_top':
+            return self.window_manager.set_window_always_on_top()
+        else:
+            print(f"Unknown window action: {action}")
+            return False
+
+    def _execute_app_command(self, command) -> bool:
+        """Execute application-related commands"""
+        action = command.action
+
+        if action == 'launch_app':
+            return self.app_controller.launch_application(command.app_name)
+        elif action == 'open_url':
+            return self.app_controller.open_url(command.app_url)
+        elif action == 'switch_app':
+            return self.app_controller.switch_to_application(command.app_name)
+        elif action == 'close_app':
+            return self.app_controller.close_application(command.app_name, force=False)
+        elif action == 'kill_app':
+            return self.app_controller.kill_application(command.app_name)
+        else:
+            print(f"Unknown app action: {action}")
+            return False
+
+    def _execute_audio_command(self, command) -> bool:
+        """Execute audio-related commands"""
+        action = command.action
+
+        if action == 'set_volume':
+            return self.audio_controller.set_master_volume(command.volume_level)
+        elif action == 'volume_up':
+            return self.audio_controller.volume_up()
+        elif action == 'volume_down':
+            return self.audio_controller.volume_down()
+        elif action == 'mute':
+            return self.audio_controller.mute()
+        elif action == 'unmute':
+            return self.audio_controller.unmute()
+        elif action == 'toggle_mute':
+            return self.audio_controller.toggle_mute()
+        else:
+            print(f"Unknown audio action: {action}")
+            return False
+
+    def _execute_keyboard_command(self, command) -> bool:
+        """Execute keyboard-related commands"""
+        action = command.action
+
+        if action == 'type_text':
+            return self.automation_controller.type_text(command.text_to_type)
+        elif action == 'press_keys':
+            return self.automation_controller.press_hotkey(*command.key_combo)
+        elif action == 'press_shortcut':
+            return self.automation_controller.press_hotkey(*command.key_combo)
+        elif action == 'save':
+            return self.automation_controller.save()
+        elif action == 'copy':
+            return self.automation_controller.copy()
+        elif action == 'paste':
+            return self.automation_controller.paste()
+        elif action == 'cut':
+            return self.automation_controller.cut()
+        elif action == 'undo':
+            return self.automation_controller.undo()
+        elif action == 'redo':
+            return self.automation_controller.redo()
+        elif action == 'select_all':
+            return self.automation_controller.select_all()
+        else:
+            print(f"Unknown keyboard action: {action}")
+            return False
+
+    def _execute_mouse_command(self, command) -> bool:
+        """Execute mouse-related commands"""
+        action = command.action
+
+        if action == 'click':
+            return self.automation_controller.click_mouse()
+        elif action == 'double_click':
+            return self.automation_controller.double_click()
+        elif action == 'right_click':
+            return self.automation_controller.right_click()
+        elif action == 'scroll':
+            params = command.parameters
+            direction = params.get('direction', 'down')
+            amount = params.get('amount', 3)
+            return self.automation_controller.scroll(amount, direction)
+        elif action == 'move_mouse':
+            x, y = command.position
+            return self.automation_controller.move_mouse(x, y)
+        else:
+            print(f"Unknown mouse action: {action}")
+            return False
+
+    def _execute_file_command(self, command) -> bool:
+        """Execute file-related commands"""
+        action = command.action
+
+        if action == 'open_folder':
+            if command.folder_name:
+                return self.file_controller.open_folder(command.folder_name)
+            elif command.file_path:
+                return self.file_controller.open_folder(command.file_path)
+        elif action == 'open_file':
+            return self.file_controller.open_file(command.file_path)
+        elif action == 'create_folder':
+            return self.file_controller.create_folder(command.folder_name)
+        elif action == 'delete_folder':
+            return self.file_controller.delete_folder(command.folder_name)
+        else:
+            print(f"Unknown file action: {action}")
+            return False
+
+        return False
+
+    def _execute_clipboard_command(self, command) -> bool:
+        """Execute clipboard-related commands"""
+        action = command.action
+
+        if action == 'paste_from_history':
+            return self.clipboard_controller.paste_from_history(command.clipboard_index)
+        elif action == 'clear_clipboard':
+            return self.clipboard_controller.clear_clipboard()
+        else:
+            print(f"Unknown clipboard action: {action}")
+            return False
+
+    def on_voice_command_error(self, error_msg: str):
+        """Handle voice command error"""
+        print(f"Voice command error: {error_msg}")
+        # Only show critical errors to user
+        if "microphone" in error_msg.lower() or "service" in error_msg.lower():
+            self.show_notification("Voice Command Error", error_msg)
+
+    def on_voice_command_status(self, status: str):
+        """Handle voice command status change"""
+        print(f"Voice command status: {status}")
 
     def start_recording(self):
         """Start recording audio"""
@@ -260,6 +638,10 @@ class WhisperApp(QApplication):
         api_key = self.config_manager.get_api_key()
         self.transcription_service.update_api_key(api_key)
 
+        # Re-register hotkeys if they changed
+        self.hotkey_manager.unregister_all()
+        self.setup_hotkeys()
+
         self.show_notification("Settings Updated", "Your settings have been saved")
 
     def show_welcome_message(self):
@@ -285,7 +667,16 @@ class WhisperApp(QApplication):
 
     def quit_app(self):
         """Quit the application"""
+        # Stop voice commands if running
+        if self.voice_listener:
+            self.stop_voice_commands()
+
         self.audio_recorder.cleanup()
+<<<<<<< HEAD
+=======
+        self.recording_indicator.hide_indicator()
+        self.hotkey_manager.unregister_all()
+>>>>>>> 3659bcb84bcc7d1bd1ef35b2e82261f96a41e4ff
         self.tray_icon.hide()
         self.quit()
 
