@@ -19,12 +19,20 @@ from settings_dialog import SettingsDialog
 from hotkey_manager import HotkeyManager
 from window_manager import WindowManager
 from command_parser import CommandParser
-from voice_command_listener import VoiceCommandListener
 from application_controller import ApplicationController
 from automation_controller import AutomationController
 from audio_controller import AudioController
 from clipboard_controller import ClipboardController
 from file_controller import FileController
+
+# Legacy voice listener (optional - requires speech_recognition which has deprecated dependencies)
+try:
+    from voice_command_listener import VoiceCommandListener
+    LEGACY_VOICE_AVAILABLE = True
+except ImportError:
+    VoiceCommandListener = None
+    LEGACY_VOICE_AVAILABLE = False
+    print("Warning: Legacy voice listener not available (speech_recognition not installed)")
 
 # JARVIS AI Components
 from whisper_voice_listener import WhisperVoiceListener
@@ -322,7 +330,16 @@ class WhisperApp(QApplication):
                 )
 
             else:
-                # Legacy Mode: Use Google Speech Recognition
+                # Legacy Mode: Use Google Speech Recognition (if available)
+                if not LEGACY_VOICE_AVAILABLE:
+                    error_msg = "Legacy voice mode requires speech_recognition library which is not compatible with Python 3.13+. Please use JARVIS mode instead."
+                    print(error_msg)
+                    self.show_notification(
+                        "Voice Commands Unavailable",
+                        "Please enable JARVIS mode in settings"
+                    )
+                    return
+
                 print("Starting legacy mode with Google Speech Recognition...")
 
                 # Map language code to speech recognition format

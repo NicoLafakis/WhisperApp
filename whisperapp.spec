@@ -73,7 +73,7 @@ a = Analysis(
     ],
     hookspath=['hooks'],
     hooksconfig={},
-    runtime_hooks=['hooks/runtime-hook-aifc.py'],
+    runtime_hooks=[],
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
