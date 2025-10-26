@@ -4,13 +4,23 @@ A Windows 11 desktop application for push-to-talk transcription using OpenAI's W
 
 ## Features
 
+### Core Features
 - **Push-to-Talk**: Hold `Ctrl+Shift+Space` to record, release to transcribe
 - **Smart Text Insertion**: Automatically inserts transcribed text into the active text field
-- **Clipboard Fallback**: If no text field is active, copies to clipboard with notification
-- **System Tray Integration**: Runs quietly in the background
+- **Customizable Hotkeys**: Configure your own keyboard shortcuts for all functions
+- **System Tray Integration**: Runs quietly in the background with easy access to features
 - **Secure Settings**: Encrypted API key storage
 - **Multi-language Support**: Supports multiple languages including English, Spanish, French, German, and more
-- **Windows 11 Native**: Built specifically for Windows 11
+
+### Voice Command Control (✨ New!)
+- **Window Management**: Minimize, maximize, close, snap, and move windows with voice
+- **Multi-Monitor Navigation**: Control window positioning across multiple monitors
+- **Application Control**: Launch, switch, and close applications by voice
+- **System Audio Control**: Adjust volume, mute/unmute with voice commands
+- **Keyboard Automation**: Press keys, shortcuts, and type text by voice
+- **Mouse Control**: Click, scroll, and move mouse with voice commands
+- **File Operations**: Open folders, create/delete files with voice
+- **Clipboard Management**: Access clipboard history by voice
 
 ## Screenshots
 
@@ -58,16 +68,86 @@ A Windows 11 desktop application for push-to-talk transcription using OpenAI's W
 2. Right-click the system tray icon
 3. Select "Settings"
 4. Enter your OpenAI API key
-5. (Optional) Adjust other settings like language preference
-6. Click "Save"
+5. (Optional) Adjust other settings like language preference and hotkeys
+6. (Optional) Enable voice commands for window navigation
+7. Click "Save"
 
-### Using the App
+### Push-to-Talk Transcription
 
 1. Click on any text field (Word, Notepad, browser, etc.)
-2. Press and hold `Ctrl+Shift+Space`
+2. Press and hold `Ctrl+Shift+Space` (or your custom hotkey)
 3. Speak while holding the keys
 4. Release the keys when done speaking
 5. The transcribed text will be automatically inserted at your cursor
+
+### Voice-Activated Navigation
+
+Enable voice commands from the system tray menu or settings:
+
+1. Right-click the system tray icon
+2. Click "Enable Voice Commands" (or use `Ctrl+Shift+V`)
+3. Say a command like:
+   - "Monitor one, quadrant one" - Move active window to monitor 1, top-left
+   - "Monitor two, quadrant four" - Move active window to monitor 2, bottom-right
+   - "Screen one, top right" - Move active window to monitor 1, top-right
+
+#### Quadrant Layout
+
+Each monitor is divided into 4 quadrants:
+
+```
++-----+-----+
+|  1  |  2  |  (Top)
++-----+-----+
+|  3  |  4  |  (Bottom)
++-----+-----+
+ Left Right
+```
+
+#### Supported Voice Commands
+
+##### Window Navigation & Management
+- **Position Windows**: "Monitor [1-9], quadrant [1-4]" or "Screen one, top left"
+- **Minimize**: "Minimize window" or "Minimize"
+- **Maximize**: "Maximize window" or "Maximize"
+- **Close**: "Close window" or "Close"
+- **Restore**: "Restore window"
+- **Center**: "Center window"
+- **Snap**: "Snap left", "Snap right", "Snap top", "Snap bottom"
+- **Move Monitor**: "Move to next monitor"
+- **Always on Top**: "Set window on top"
+
+##### Application Control
+- **Launch**: "Open Chrome", "Launch Notepad", "Start Calculator"
+- **Open URL**: "Open google.com", "Open github.com"
+- **Switch**: "Switch to Chrome", "Focus Slack"
+- **Close**: "Close Chrome", "Close Spotify"
+- **Force Quit**: "Kill Chrome", "Force close Edge"
+
+##### Audio Control
+- **Volume**: "Volume up", "Volume down", "Set volume to 50"
+- **Mute**: "Mute", "Unmute", "Toggle mute"
+
+##### Keyboard Automation
+- **Type**: "Type hello world"
+- **Press**: "Press enter", "Press escape"
+- **Shortcuts**: "Press ctrl+s", "Press alt+tab"
+- **Quick Actions**: "Save", "Copy", "Paste", "Cut", "Undo", "Redo", "Select all"
+
+##### Mouse Control
+- **Click**: "Click", "Double click", "Right click"
+- **Scroll**: "Scroll down", "Scroll up"
+- **Move**: "Move mouse to 500, 300"
+
+##### File & Folder Operations
+- **Open Folders**: "Open desktop", "Open downloads", "Open documents"
+- **Open Custom Folder**: "Open folder C:\\Projects"
+- **Create**: "Create folder NewProject"
+- **Delete**: "Delete folder OldProject"
+
+##### Clipboard Operations
+- **Paste from History**: "Paste from history 1", "Paste from history 2"
+- **Clear**: "Clear clipboard"
 
 ### If No Text Field is Active
 
@@ -78,21 +158,31 @@ If you're not in a text field:
 
 ## Settings
 
-### API Configuration
+The settings dialog is now organized into tabs for easy access:
+
+### API Settings Tab
 
 - **API Key**: Your OpenAI API key (required)
 - **Model**: Whisper model to use (currently whisper-1)
 - **Language**: Target language for transcription (or auto-detect)
 
-### Behavior
+### Hotkeys Tab
+
+- **Push-to-Talk Hotkey**: Customize the keyboard shortcut for recording (default: `Ctrl+Shift+Space`)
+- **Voice Command Toggle Hotkey**: Customize the shortcut to enable/disable voice commands (default: `Ctrl+Shift+V`)
+- **Record Hotkey**: Click to easily capture a new key combination
+
+### Voice Commands Tab
+
+- **Enable Voice Navigation**: Toggle voice-activated window control
+- **Show Notifications**: Display notifications when voice commands are executed
+- **Sensitivity**: Adjust voice recognition sensitivity (Low, Medium, High)
+- **Available Commands**: View list of supported voice commands
+
+### Behavior Tab
 
 - **Automatically copy to clipboard**: Always copy transcriptions to clipboard
-- **Show notifications**: Display notifications when transcription is complete
-
-### Hotkey
-
-- Default: `Ctrl+Shift+Space`
-- Customization coming in future updates
+- **Show transcription notifications**: Display notifications when transcription is complete
 
 ## Troubleshooting
 
@@ -145,19 +235,24 @@ WhisperApp is free and open source. However, you'll need an OpenAI API account:
 ```
 WhisperApp/
 ├── src/
-│   ├── main.py                 # Main application
-│   ├── config_manager.py       # Settings management
-│   ├── audio_recorder.py       # Audio recording
-│   ├── transcription_service.py # OpenAI API integration
-│   ├── text_inserter.py        # Text insertion logic
-│   └── settings_dialog.py      # Settings UI
+│   ├── main.py                      # Main application
+│   ├── config_manager.py            # Settings management
+│   ├── audio_recorder.py            # Audio recording
+│   ├── transcription_service.py     # OpenAI API integration
+│   ├── text_inserter.py             # Text insertion logic
+│   ├── settings_dialog.py           # Settings UI (tabbed)
+│   ├── hotkey_manager.py            # Hotkey registration/management
+│   ├── window_manager.py            # Window positioning and monitor detection
+│   ├── command_parser.py            # Voice command parsing
+│   ├── voice_command_listener.py    # Continuous voice listening
+│   └── recording_indicator.py       # Visual recording feedback
 ├── assets/
-│   ├── icon.png                # App icon (PNG)
-│   └── icon.ico                # App icon (ICO)
-├── requirements.txt            # Python dependencies
-├── whisperapp.spec            # PyInstaller configuration
-├── build.bat                   # Windows build script
-└── README.md                   # This file
+│   ├── icon.png                     # App icon (PNG)
+│   └── icon.ico                     # App icon (ICO)
+├── requirements.txt                 # Python dependencies
+├── whisperapp.spec                  # PyInstaller configuration
+├── build.bat                        # Windows build script
+└── README.md                        # This file
 ```
 
 ### Running in Development Mode
@@ -201,15 +296,48 @@ If you encounter any issues or have questions:
 
 ## Roadmap
 
-- [ ] Custom hotkey configuration
+- [x] Custom hotkey configuration
+- [x] Voice commands for window navigation
+- [x] Multi-monitor support
+- [x] Window management (minimize, maximize, close, snap)
+- [x] Application control (launch, switch, close)
+- [x] Audio control (volume, mute)
+- [x] Keyboard automation
+- [x] Mouse control
+- [x] File operations
+- [x] Clipboard management
 - [ ] Multiple language models
 - [ ] Local Whisper model support (no API required)
 - [ ] History of transcriptions
 - [ ] Export transcriptions
-- [ ] Voice commands
 - [ ] Custom wake word
+- [ ] Voice command macros and workflows
+- [ ] Virtual desktop control
+- [ ] Display settings control
 
 ## Version History
+
+### v3.0.0 (2025-10-26) - "Total Control" Update
+- **Massive expansion of voice command capabilities**
+- Added comprehensive window management (minimize, maximize, close, restore, center, snap, always-on-top)
+- Added application controller (launch, switch, close, kill apps)
+- Added system audio control (volume up/down, mute/unmute, set volume)
+- Added keyboard automation (type text, press keys, shortcuts, save/copy/paste/cut/undo/redo)
+- Added mouse control (click, double-click, right-click, scroll, move)
+- Added file & folder operations (open folders, create/delete folders)
+- Added clipboard management with history access
+- New modules: ApplicationController, AutomationController, AudioController, ClipboardController, FileController
+- Enhanced command parser supporting 50+ voice commands across 7 categories
+- Updated requirements: psutil, pycaw, comtypes
+
+### v2.0.0 (2025-10-25)
+- Added voice-activated navigation for window control
+- Added customizable hotkeys for all functions
+- Added multi-monitor support with quadrant layout
+- Added tabbed settings interface
+- Enhanced voice command system with continuous listening
+- Improved hotkey management system
+- Added voice command sensitivity settings
 
 ### v1.0.0 (2025-10-23)
 - Initial release
