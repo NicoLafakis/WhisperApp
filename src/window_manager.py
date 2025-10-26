@@ -679,3 +679,133 @@ class WindowManager:
         except Exception as e:
             print(f"Error tiling windows: {e}")
             return False
+
+    # ========== Simplified Positioning System (JARVIS) ==========
+
+    def get_position_rect(self, monitor_number: int, position: str) -> Optional[Tuple[int, int, int, int]]:
+        """
+        Get rectangle for simplified positioning system
+
+        Position layout for vertical monitors (1 and 2):
+        +-------------+
+        |     top     |
+        +-------------+
+        |   bottom    |
+        +-------------+
+
+        Position layout for horizontal monitor (3):
+        +-------------+
+        |     full    |
+        +-------------+
+
+        Args:
+            monitor_number: Monitor number (1-indexed)
+            position: Position name ('top', 'bottom', 'full')
+
+        Returns:
+            Tuple of (x, y, width, height) or None if invalid
+        """
+        monitor = self.get_monitor(monitor_number)
+        if not monitor:
+            return None
+
+        position = position.lower()
+        if position not in ['top', 'bottom', 'full']:
+            return None
+
+        # Use work area to avoid taskbar
+        x = monitor.work_x
+        y = monitor.work_y
+        width = monitor.work_width
+        height = monitor.work_height
+
+        # Full position - use entire work area
+        if position == 'full':
+            return (x, y, width, height)
+
+        # Top/Bottom split - divide vertically
+        half_height = height // 2
+
+        if position == 'top':
+            return (x, y, width, half_height)
+        elif position == 'bottom':
+            return (x, y + half_height, width, half_height)
+
+    def move_window_to_position(self, monitor_number: int, position: str,
+                               hwnd: Optional[int] = None) -> bool:
+        """
+        Move window to simplified position (top/bottom/full)
+
+        Args:
+            monitor_number: Monitor number (1-indexed)
+            position: Position name ('top', 'bottom', 'full')
+            hwnd: Window handle (if None, uses foreground window)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Get the window to move
+        if hwnd is None:
+            hwnd = self.get_foreground_window()
+
+        if not self.is_window_valid(hwnd):
+            print("Invalid or no foreground window")
+            return False
+
+        # Get position rectangle
+        rect = self.get_position_rect(monitor_number, position)
+        if not rect:
+            print(f"Invalid monitor {monitor_number} or position {position}")
+            return False
+
+        x, y, width, height = rect
+
+        # Move the window
+        success = self.move_window(hwnd, x, y, width, height)
+
+        if success:
+            title = self.get_window_title(hwnd)
+            print(f"Moved '{title}' to monitor {monitor_number}, position {position}")
+
+        return success
+
+    def get_windows_at_position(self, monitor_number: int, position: str) -> List[int]:
+        """
+        Get all windows at a specific position
+
+        Args:
+            monitor_number: Monitor number (1-indexed)
+            position: Position name ('top', 'bottom', 'full')
+
+        Returns:
+            List of window handles
+        """
+        rect = self.get_position_rect(monitor_number, position)
+        if not rect:
+            return []
+
+        px, py, pw, ph = rect
+        windows = []
+
+        def enum_windows_callback(hwnd, lParam):
+            if self.is_window_valid(hwnd):
+                try:
+                    # Get window rect
+                    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+                    wx, wy = left, top
+                    ww, wh = right - left, bottom - top
+
+                    # Check if window center is in position
+                    center_x = wx + ww // 2
+                    center_y = wy + wh // 2
+
+                    if (px <= center_x < px + pw and
+                        py <= center_y < py + ph):
+                        windows.append(hwnd)
+
+                except:
+                    pass
+            return True
+
+        win32gui.EnumWindows(enum_windows_callback, None)
+        return windows

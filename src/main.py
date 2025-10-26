@@ -26,6 +26,13 @@ from audio_controller import AudioController
 from clipboard_controller import ClipboardController
 from file_controller import FileController
 
+# JARVIS AI Components
+from whisper_voice_listener import WhisperVoiceListener
+from function_registry import FunctionRegistry
+from natural_language_processor import NaturalLanguageProcessor
+from text_to_speech import TextToSpeechManager
+from conversation_manager import ConversationManager
+
 
 class TranscriptionWorker(QThread):
     """Worker thread for transcription to avoid blocking UI"""
@@ -88,6 +95,47 @@ class WhisperApp(QApplication):
                 self.config_manager.set_api_key(api_key)
 
         self.transcription_service = TranscriptionService(api_key)
+
+        # Initialize JARVIS AI components
+        self.function_registry = FunctionRegistry(
+            self.window_manager,
+            self.app_controller,
+            self.automation_controller,
+            self.audio_controller,
+            self.clipboard_controller,
+            self.file_controller
+        )
+
+        # Get JARVIS settings from config (with defaults)
+        jarvis_config = self.config_manager.get('jarvis', {})
+        nlu_model = jarvis_config.get('model', 'gpt-4o-mini')
+        verbosity = jarvis_config.get('response_verbosity', 'balanced')
+        tts_voice = jarvis_config.get('voice', 'alloy')
+        tts_model = jarvis_config.get('tts_model', 'tts-1')
+        tts_speed = jarvis_config.get('speaking_speed', 1.0)
+
+        self.nlu_processor = NaturalLanguageProcessor(
+            api_key,
+            self.function_registry,
+            model=nlu_model,
+            verbosity=verbosity
+        )
+
+        self.tts_manager = TextToSpeechManager(
+            api_key,
+            voice=tts_voice,
+            model=tts_model,
+            speed=tts_speed
+        )
+
+        self.conversation_manager = ConversationManager(
+            self.nlu_processor,
+            self.tts_manager
+        )
+
+        # JARVIS mode flag (True = JARVIS AI, False = Legacy command mode)
+        self.jarvis_mode = jarvis_config.get('enabled', True)  # Default to JARVIS mode
+        self.whisper_voice_listener = None
 
         # State
         self.is_recording = False
@@ -229,40 +277,80 @@ class WhisperApp(QApplication):
 
     def start_voice_commands(self):
         """Start voice command listening"""
-        if self.voice_listener and self.voice_listener.is_active():
-            return  # Already running
+        # Check if already running
+        if self.jarvis_mode:
+            if self.whisper_voice_listener and self.whisper_voice_listener.is_active():
+                return
+        else:
+            if self.voice_listener and self.voice_listener.is_active():
+                return
 
         try:
             # Get settings
             sensitivity = self.config_manager.get_voice_command_setting('sensitivity', 'medium')
             language = self.config_manager.get('language', 'en')
 
-            # Map language code to speech recognition format
-            lang_map = {
-                'en': 'en-US',
-                'es': 'es-ES',
-                'fr': 'fr-FR',
-                'de': 'de-DE',
-                'it': 'it-IT',
-                'pt': 'pt-PT',
-                'ru': 'ru-RU',
-                'ja': 'ja-JP',
-                'ko': 'ko-KR',
-                'zh': 'zh-CN',
-            }
-            sr_language = lang_map.get(language, 'en-US')
+            if self.jarvis_mode:
+                # JARVIS Mode: Use WhisperVoiceListener with wake word
+                print("Starting JARVIS mode with Whisper voice listener...")
 
-            # Create and start listener
-            self.voice_listener = VoiceCommandListener(sensitivity, sr_language)
-            self.voice_listener.command_detected.connect(self.on_voice_command_detected)
-            self.voice_listener.error_occurred.connect(self.on_voice_command_error)
-            self.voice_listener.status_changed.connect(self.on_voice_command_status)
-            self.voice_listener.start()
+                # Get JARVIS settings
+                jarvis_config = self.config_manager.get('jarvis', {})
+                wake_word = jarvis_config.get('wake_word', 'jarvis')
 
-            self.show_notification(
-                "Voice Commands Enabled",
-                "Voice navigation is now active"
-            )
+                # Create and start Whisper-based listener
+                self.whisper_voice_listener = WhisperVoiceListener(
+                    self.transcription_service,
+                    sensitivity=sensitivity,
+                    wake_word=wake_word,
+                    language=language if language != 'auto' else None
+                )
+
+                # Connect signals
+                self.whisper_voice_listener.command_detected.connect(self.on_jarvis_command_detected)
+                self.whisper_voice_listener.wake_word_detected.connect(self.on_wake_word_detected)
+                self.whisper_voice_listener.error_occurred.connect(self.on_voice_command_error)
+                self.whisper_voice_listener.status_changed.connect(self.on_voice_command_status)
+                self.whisper_voice_listener.listening_state_changed.connect(self.on_listening_state_changed)
+
+                # Start the listener
+                self.whisper_voice_listener.start()
+
+                self.show_notification(
+                    "JARVIS Activated",
+                    f"Say 'Hey {wake_word.title()}' to activate voice control"
+                )
+
+            else:
+                # Legacy Mode: Use Google Speech Recognition
+                print("Starting legacy mode with Google Speech Recognition...")
+
+                # Map language code to speech recognition format
+                lang_map = {
+                    'en': 'en-US',
+                    'es': 'es-ES',
+                    'fr': 'fr-FR',
+                    'de': 'DE-DE',
+                    'it': 'it-IT',
+                    'pt': 'pt-PT',
+                    'ru': 'ru-RU',
+                    'ja': 'ja-JP',
+                    'ko': 'ko-KR',
+                    'zh': 'zh-CN',
+                }
+                sr_language = lang_map.get(language, 'en-US')
+
+                # Create and start legacy listener
+                self.voice_listener = VoiceCommandListener(sensitivity, sr_language)
+                self.voice_listener.command_detected.connect(self.on_voice_command_detected)
+                self.voice_listener.error_occurred.connect(self.on_voice_command_error)
+                self.voice_listener.status_changed.connect(self.on_voice_command_status)
+                self.voice_listener.start()
+
+                self.show_notification(
+                    "Voice Commands Enabled",
+                    "Voice navigation is now active"
+                )
 
         except Exception as e:
             print(f"Error starting voice commands: {e}")
@@ -273,18 +361,28 @@ class WhisperApp(QApplication):
 
     def stop_voice_commands(self):
         """Stop voice command listening"""
+        if self.whisper_voice_listener:
+            self.whisper_voice_listener.stop_listening()
+            self.whisper_voice_listener.wait(2000)
+            self.whisper_voice_listener = None
+
         if self.voice_listener:
             self.voice_listener.stop_listening()
             self.voice_listener.wait(2000)  # Wait up to 2 seconds for thread to finish
             self.voice_listener = None
 
+        # Stop any ongoing TTS
+        if self.conversation_manager:
+            self.conversation_manager.stop_speaking()
+
+        mode_name = "JARVIS" if self.jarvis_mode else "Voice Commands"
         self.show_notification(
-            "Voice Commands Disabled",
+            f"{mode_name} Disabled",
             "Voice navigation is now inactive"
         )
 
     def on_voice_command_detected(self, text: str):
-        """Handle detected voice command"""
+        """Handle detected voice command (Legacy mode)"""
         print(f"Voice command detected: {text}")
 
         # Parse the command
@@ -302,6 +400,42 @@ class WhisperApp(QApplication):
         if success and self.config_manager.get_voice_command_setting('show_notifications', True):
             action_desc = self._get_command_description(command)
             self.show_notification("Command Executed", action_desc)
+
+    def on_jarvis_command_detected(self, text: str):
+        """Handle detected JARVIS command (AI mode)"""
+        print(f"JARVIS command detected: {text}")
+
+        try:
+            # Process through conversation manager (includes NLU + TTS)
+            response = self.conversation_manager.process_voice_command(
+                text,
+                speak_response=True
+            )
+
+            # Optionally show notification (response will be spoken)
+            if self.config_manager.get_voice_command_setting('show_notifications', False):
+                # Show brief notification with response
+                self.show_notification("JARVIS", response[:100])
+
+        except Exception as e:
+            print(f"Error processing JARVIS command: {e}")
+            self.show_notification("JARVIS Error", str(e))
+
+    def on_wake_word_detected(self):
+        """Handle wake word detection"""
+        print("Wake word detected - JARVIS is now listening")
+
+        # Optional: Play a beep sound or show indicator
+        self.show_notification("JARVIS", "Yes?", duration=1)
+
+    def on_listening_state_changed(self, is_active: bool):
+        """Handle listening state changes"""
+        if is_active:
+            print("JARVIS is actively listening for commands")
+            self.status_action.setText("Status: JARVIS Listening")
+        else:
+            print("JARVIS returned to wake word listening")
+            self.status_action.setText("Status: Listening for wake word")
 
     def _get_command_description(self, command) -> str:
         """Get a human-readable description of the command"""
@@ -615,10 +749,10 @@ class WhisperApp(QApplication):
         self.status_action.setText("Status: Ready")
         self.show_notification("Transcription Error", error_msg)
 
-    def show_notification(self, title, message):
+    def show_notification(self, title, message, duration=3):
         """Show system notification"""
         try:
-            self.tray_icon.showMessage(title, message, QSystemTrayIcon.Information, 3000)
+            self.tray_icon.showMessage(title, message, QSystemTrayIcon.Information, duration * 1000)
         except Exception as e:
             print(f"Notification error: {e}")
 
@@ -634,9 +768,36 @@ class WhisperApp(QApplication):
         api_key = self.config_manager.get_api_key()
         self.transcription_service.update_api_key(api_key)
 
+        # Update JARVIS components with new API key and settings
+        if self.nlu_processor:
+            self.nlu_processor.update_api_key(api_key)
+
+        if self.tts_manager:
+            self.tts_manager.update_api_key(api_key)
+
+        # Update JARVIS settings if changed
+        jarvis_config = self.config_manager.get('jarvis', {})
+        if jarvis_config:
+            # Update NLU settings
+            if self.conversation_manager:
+                self.conversation_manager.update_nlu_settings(
+                    model=jarvis_config.get('model'),
+                    verbosity=jarvis_config.get('response_verbosity')
+                )
+                self.conversation_manager.update_tts_settings(
+                    voice=jarvis_config.get('voice'),
+                    model=jarvis_config.get('tts_model'),
+                    speed=jarvis_config.get('speaking_speed')
+                )
+
         # Re-register hotkeys if they changed
         self.hotkey_manager.unregister_all()
         self.setup_hotkeys()
+
+        # Restart voice commands if mode changed
+        if self.config_manager.is_voice_commands_enabled():
+            self.stop_voice_commands()
+            self.start_voice_commands()
 
         self.show_notification("Settings Updated", "Your settings have been saved")
 
@@ -664,8 +825,11 @@ class WhisperApp(QApplication):
     def quit_app(self):
         """Quit the application"""
         # Stop voice commands if running
-        if self.voice_listener:
-            self.stop_voice_commands()
+        self.stop_voice_commands()
+
+        # Cleanup JARVIS components
+        if self.tts_manager:
+            self.tts_manager.cleanup()
 
         self.audio_recorder.cleanup()
         self.hotkey_manager.unregister_all()
