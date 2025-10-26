@@ -4,17 +4,23 @@ A Windows 11 desktop application for push-to-talk transcription using OpenAI's W
 
 ## Features
 
+### Core Features
 - **Push-to-Talk**: Hold `Ctrl+Shift+Space` to record, release to transcribe
-- **Voice-Activated Navigation**: Control window positioning with voice commands (e.g., "Monitor one, quadrant one")
-- **Customizable Hotkeys**: Configure your own keyboard shortcuts for push-to-talk and voice command toggle
 - **Smart Text Insertion**: Automatically inserts transcribed text into the active text field
-- **Multi-Monitor Support**: Move and organize windows across multiple monitors with voice commands
-- **Quadrant Layout**: Organize windows into 4 quadrants per monitor for efficient screen management
-- **Clipboard Fallback**: If no text field is active, copies to clipboard with notification
+- **Customizable Hotkeys**: Configure your own keyboard shortcuts for all functions
 - **System Tray Integration**: Runs quietly in the background with easy access to features
 - **Secure Settings**: Encrypted API key storage
 - **Multi-language Support**: Supports multiple languages including English, Spanish, French, German, and more
-- **Windows 11 Native**: Built specifically for Windows 11
+
+### Voice Command Control (✨ New!)
+- **Window Management**: Minimize, maximize, close, snap, and move windows with voice
+- **Multi-Monitor Navigation**: Control window positioning across multiple monitors
+- **Application Control**: Launch, switch, and close applications by voice
+- **System Audio Control**: Adjust volume, mute/unmute with voice commands
+- **Keyboard Automation**: Press keys, shortcuts, and type text by voice
+- **Mouse Control**: Click, scroll, and move mouse with voice commands
+- **File Operations**: Open folders, create/delete files with voice
+- **Clipboard Management**: Access clipboard history by voice
 
 ## Screenshots
 
@@ -100,9 +106,48 @@ Each monitor is divided into 4 quadrants:
 
 #### Supported Voice Commands
 
-- "Monitor [1-9], quadrant [1-4]"
-- "Screen [1-9], quadrant [1-4]"
-- "Monitor [1-9], [top/bottom] [left/right]"
+##### Window Navigation & Management
+- **Position Windows**: "Monitor [1-9], quadrant [1-4]" or "Screen one, top left"
+- **Minimize**: "Minimize window" or "Minimize"
+- **Maximize**: "Maximize window" or "Maximize"
+- **Close**: "Close window" or "Close"
+- **Restore**: "Restore window"
+- **Center**: "Center window"
+- **Snap**: "Snap left", "Snap right", "Snap top", "Snap bottom"
+- **Move Monitor**: "Move to next monitor"
+- **Always on Top**: "Set window on top"
+
+##### Application Control
+- **Launch**: "Open Chrome", "Launch Notepad", "Start Calculator"
+- **Open URL**: "Open google.com", "Open github.com"
+- **Switch**: "Switch to Chrome", "Focus Slack"
+- **Close**: "Close Chrome", "Close Spotify"
+- **Force Quit**: "Kill Chrome", "Force close Edge"
+
+##### Audio Control
+- **Volume**: "Volume up", "Volume down", "Set volume to 50"
+- **Mute**: "Mute", "Unmute", "Toggle mute"
+
+##### Keyboard Automation
+- **Type**: "Type hello world"
+- **Press**: "Press enter", "Press escape"
+- **Shortcuts**: "Press ctrl+s", "Press alt+tab"
+- **Quick Actions**: "Save", "Copy", "Paste", "Cut", "Undo", "Redo", "Select all"
+
+##### Mouse Control
+- **Click**: "Click", "Double click", "Right click"
+- **Scroll**: "Scroll down", "Scroll up"
+- **Move**: "Move mouse to 500, 300"
+
+##### File & Folder Operations
+- **Open Folders**: "Open desktop", "Open downloads", "Open documents"
+- **Open Custom Folder**: "Open folder C:\\Projects"
+- **Create**: "Create folder NewProject"
+- **Delete**: "Delete folder OldProject"
+
+##### Clipboard Operations
+- **Paste from History**: "Paste from history 1", "Paste from history 2"
+- **Clear**: "Clear clipboard"
 
 ### If No Text Field is Active
 
@@ -254,15 +299,36 @@ If you encounter any issues or have questions:
 - [x] Custom hotkey configuration
 - [x] Voice commands for window navigation
 - [x] Multi-monitor support
+- [x] Window management (minimize, maximize, close, snap)
+- [x] Application control (launch, switch, close)
+- [x] Audio control (volume, mute)
+- [x] Keyboard automation
+- [x] Mouse control
+- [x] File operations
+- [x] Clipboard management
 - [ ] Multiple language models
 - [ ] Local Whisper model support (no API required)
 - [ ] History of transcriptions
 - [ ] Export transcriptions
 - [ ] Custom wake word
-- [ ] Additional voice commands (minimize, maximize, close windows)
-- [ ] Voice command macros
+- [ ] Voice command macros and workflows
+- [ ] Virtual desktop control
+- [ ] Display settings control
 
 ## Version History
+
+### v3.0.0 (2025-10-26) - "Total Control" Update
+- **Massive expansion of voice command capabilities**
+- Added comprehensive window management (minimize, maximize, close, restore, center, snap, always-on-top)
+- Added application controller (launch, switch, close, kill apps)
+- Added system audio control (volume up/down, mute/unmute, set volume)
+- Added keyboard automation (type text, press keys, shortcuts, save/copy/paste/cut/undo/redo)
+- Added mouse control (click, double-click, right-click, scroll, move)
+- Added file & folder operations (open folders, create/delete folders)
+- Added clipboard management with history access
+- New modules: ApplicationController, AutomationController, AudioController, ClipboardController, FileController
+- Enhanced command parser supporting 50+ voice commands across 7 categories
+- Updated requirements: psutil, pycaw, comtypes
 
 ### v2.0.0 (2025-10-25)
 - Added voice-activated navigation for window control

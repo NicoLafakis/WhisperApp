@@ -21,6 +21,11 @@ from hotkey_manager import HotkeyManager
 from window_manager import WindowManager
 from command_parser import CommandParser
 from voice_command_listener import VoiceCommandListener
+from application_controller import ApplicationController
+from automation_controller import AutomationController
+from audio_controller import AudioController
+from clipboard_controller import ClipboardController
+from file_controller import FileController
 
 
 class TranscriptionWorker(QThread):
@@ -67,6 +72,13 @@ class WhisperApp(QApplication):
         self.window_manager = WindowManager()
         self.command_parser = CommandParser()
         self.voice_listener = None
+
+        # Initialize new controllers
+        self.app_controller = ApplicationController()
+        self.automation_controller = AutomationController()
+        self.audio_controller = AudioController()
+        self.clipboard_controller = ClipboardController()
+        self.file_controller = FileController()
 
         # Initialize transcription service with API key
         api_key = self.config_manager.get_api_key()
@@ -287,43 +299,237 @@ class WhisperApp(QApplication):
             print(f"Not a recognized command: {text}")
             return
 
-        # Validate command
-        monitor_count = self.window_manager.get_monitor_count()
-        is_valid, error = self.command_parser.validate_command(command, monitor_count)
-
-        if not is_valid:
-            print(f"Invalid command: {error}")
-            if self.config_manager.get_voice_command_setting('show_notifications', True):
-                self.show_notification("Invalid Command", error)
-            return
-
         # Execute command
         success = self.execute_voice_command(command)
 
         # Show notification if enabled
         if success and self.config_manager.get_voice_command_setting('show_notifications', True):
-            self.show_notification(
-                "Command Executed",
-                f"Moved window to monitor {command.monitor}, quadrant {command.quadrant}"
-            )
+            action_desc = self._get_command_description(command)
+            self.show_notification("Command Executed", action_desc)
+
+    def _get_command_description(self, command) -> str:
+        """Get a human-readable description of the command"""
+        category = command.category
+        action = command.action
+
+        if category == 'window':
+            if action == 'move_window':
+                return f"Moved window to monitor {command.monitor}, quadrant {command.quadrant}"
+            else:
+                return f"Window: {action.replace('_', ' ').title()}"
+        elif category == 'application':
+            if command.app_name:
+                return f"{action.replace('_', ' ').title()}: {command.app_name}"
+            elif command.app_url:
+                return f"Opened: {command.app_url}"
+        elif category == 'audio':
+            if command.volume_level is not None:
+                return f"Volume set to {command.volume_level}%"
+            else:
+                return f"Audio: {action.replace('_', ' ').title()}"
+        elif category in ['keyboard', 'mouse']:
+            return f"{category.title()}: {action.replace('_', ' ').title()}"
+        elif category == 'file':
+            if command.folder_name:
+                return f"{action.replace('_', ' ').title()}: {command.folder_name}"
+            return f"File: {action.replace('_', ' ').title()}"
+        elif category == 'clipboard':
+            return f"Clipboard: {action.replace('_', ' ').title()}"
+
+        return "Command executed successfully"
 
     def execute_voice_command(self, command) -> bool:
         """Execute a parsed voice command"""
         try:
-            if command.action == 'move_window':
-                # Move the active window to the specified position
-                success = self.window_manager.move_window_to_quadrant(
-                    command.monitor,
-                    command.quadrant
-                )
-                return success
+            category = command.category
+            action = command.action
+
+            # Window Navigation & Operations
+            if category == 'window':
+                return self._execute_window_command(command)
+
+            # Application Operations
+            elif category == 'application':
+                return self._execute_app_command(command)
+
+            # Audio Operations
+            elif category == 'audio':
+                return self._execute_audio_command(command)
+
+            # Keyboard Operations
+            elif category == 'keyboard':
+                return self._execute_keyboard_command(command)
+
+            # Mouse Operations
+            elif category == 'mouse':
+                return self._execute_mouse_command(command)
+
+            # File Operations
+            elif category == 'file':
+                return self._execute_file_command(command)
+
+            # Clipboard Operations
+            elif category == 'clipboard':
+                return self._execute_clipboard_command(command)
+
             else:
-                print(f"Unknown command action: {command.action}")
+                print(f"Unknown command category: {category}")
                 return False
 
         except Exception as e:
             print(f"Error executing command: {e}")
             self.show_notification("Command Error", f"Failed to execute: {e}")
+            return False
+
+    def _execute_window_command(self, command) -> bool:
+        """Execute window-related commands"""
+        action = command.action
+
+        if action == 'move_window':
+            return self.window_manager.move_window_to_quadrant(
+                command.monitor,
+                command.quadrant
+            )
+        elif action == 'minimize_window':
+            return self.window_manager.minimize_window()
+        elif action == 'maximize_window':
+            return self.window_manager.maximize_window()
+        elif action == 'close_window':
+            return self.window_manager.close_window()
+        elif action == 'restore_window':
+            return self.window_manager.restore_window()
+        elif action == 'center_window':
+            return self.window_manager.center_window()
+        elif action == 'snap_window':
+            position = command.parameters.get('position', 'left')
+            return self.window_manager.snap_window(position=position)
+        elif action == 'next_monitor':
+            return self.window_manager.move_to_next_monitor()
+        elif action == 'always_on_top':
+            return self.window_manager.set_window_always_on_top()
+        else:
+            print(f"Unknown window action: {action}")
+            return False
+
+    def _execute_app_command(self, command) -> bool:
+        """Execute application-related commands"""
+        action = command.action
+
+        if action == 'launch_app':
+            return self.app_controller.launch_application(command.app_name)
+        elif action == 'open_url':
+            return self.app_controller.open_url(command.app_url)
+        elif action == 'switch_app':
+            return self.app_controller.switch_to_application(command.app_name)
+        elif action == 'close_app':
+            return self.app_controller.close_application(command.app_name, force=False)
+        elif action == 'kill_app':
+            return self.app_controller.kill_application(command.app_name)
+        else:
+            print(f"Unknown app action: {action}")
+            return False
+
+    def _execute_audio_command(self, command) -> bool:
+        """Execute audio-related commands"""
+        action = command.action
+
+        if action == 'set_volume':
+            return self.audio_controller.set_master_volume(command.volume_level)
+        elif action == 'volume_up':
+            return self.audio_controller.volume_up()
+        elif action == 'volume_down':
+            return self.audio_controller.volume_down()
+        elif action == 'mute':
+            return self.audio_controller.mute()
+        elif action == 'unmute':
+            return self.audio_controller.unmute()
+        elif action == 'toggle_mute':
+            return self.audio_controller.toggle_mute()
+        else:
+            print(f"Unknown audio action: {action}")
+            return False
+
+    def _execute_keyboard_command(self, command) -> bool:
+        """Execute keyboard-related commands"""
+        action = command.action
+
+        if action == 'type_text':
+            return self.automation_controller.type_text(command.text_to_type)
+        elif action == 'press_keys':
+            return self.automation_controller.press_hotkey(*command.key_combo)
+        elif action == 'press_shortcut':
+            return self.automation_controller.press_hotkey(*command.key_combo)
+        elif action == 'save':
+            return self.automation_controller.save()
+        elif action == 'copy':
+            return self.automation_controller.copy()
+        elif action == 'paste':
+            return self.automation_controller.paste()
+        elif action == 'cut':
+            return self.automation_controller.cut()
+        elif action == 'undo':
+            return self.automation_controller.undo()
+        elif action == 'redo':
+            return self.automation_controller.redo()
+        elif action == 'select_all':
+            return self.automation_controller.select_all()
+        else:
+            print(f"Unknown keyboard action: {action}")
+            return False
+
+    def _execute_mouse_command(self, command) -> bool:
+        """Execute mouse-related commands"""
+        action = command.action
+
+        if action == 'click':
+            return self.automation_controller.click_mouse()
+        elif action == 'double_click':
+            return self.automation_controller.double_click()
+        elif action == 'right_click':
+            return self.automation_controller.right_click()
+        elif action == 'scroll':
+            params = command.parameters
+            direction = params.get('direction', 'down')
+            amount = params.get('amount', 3)
+            return self.automation_controller.scroll(amount, direction)
+        elif action == 'move_mouse':
+            x, y = command.position
+            return self.automation_controller.move_mouse(x, y)
+        else:
+            print(f"Unknown mouse action: {action}")
+            return False
+
+    def _execute_file_command(self, command) -> bool:
+        """Execute file-related commands"""
+        action = command.action
+
+        if action == 'open_folder':
+            if command.folder_name:
+                return self.file_controller.open_folder(command.folder_name)
+            elif command.file_path:
+                return self.file_controller.open_folder(command.file_path)
+        elif action == 'open_file':
+            return self.file_controller.open_file(command.file_path)
+        elif action == 'create_folder':
+            return self.file_controller.create_folder(command.folder_name)
+        elif action == 'delete_folder':
+            return self.file_controller.delete_folder(command.folder_name)
+        else:
+            print(f"Unknown file action: {action}")
+            return False
+
+        return False
+
+    def _execute_clipboard_command(self, command) -> bool:
+        """Execute clipboard-related commands"""
+        action = command.action
+
+        if action == 'paste_from_history':
+            return self.clipboard_controller.paste_from_history(command.clipboard_index)
+        elif action == 'clear_clipboard':
+            return self.clipboard_controller.clear_clipboard()
+        else:
+            print(f"Unknown clipboard action: {action}")
             return False
 
     def on_voice_command_error(self, error_msg: str):
