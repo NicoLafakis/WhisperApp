@@ -1,0 +1,76 @@
+{
+  "name": "jarvis-voice-agent",
+  "version": "1.0.0",
+  "description": "JARVIS - AI Voice Agent for Windows 11 with OpenAI Realtime API",
+  "main": "dist/main/main.js",
+  "author": "NicoLafakis",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
+    "dev:renderer": "vite",
+    "dev:main": "tsc -p tsconfig.main.json && electron dist/main/main.js",
+    "build": "npm run build:renderer && npm run build:main",
+    "build:renderer": "vite build",
+    "build:main": "tsc -p tsconfig.main.json",
+    "start": "electron dist/main/main.js",
+    "package": "electron-builder",
+    "lint": "eslint . --ext .ts,.tsx",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.27.0",
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "electron-store": "^8.1.0",
+    "elevenlabs": "^0.8.1",
+    "openai": "^4.63.0",
+    "ws": "^8.16.0",
+    "node-record-lpcm16": "^1.0.1",
+    "speaker": "^0.5.4",
+    "@picovoice/porcupine-node": "^3.0.0",
+    "sqlite3": "^5.1.7",
+    "node-powershell": "^5.0.1",
+    "node-windows": "^1.0.0-beta.8",
+    "wav": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.4",
+    "@types/react": "^18.2.42",
+    "@types/react-dom": "^18.2.17",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^6.13.2",
+    "@typescript-eslint/parser": "^6.13.2",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "eslint": "^8.55.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.7",
+    "vite-plugin-electron": "^0.28.0"
+  },
+  "build": {
+    "appId": "com.jarvis.voiceagent",
+    "productName": "JARVIS Voice Agent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
