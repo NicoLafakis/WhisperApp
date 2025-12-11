@@ -1,6 +1,6 @@
 /**
  * JARVIS Voice Agent - OpenAI Realtime API Client
- * WebRTC-based speech-to-speech communication
+ * WebSocket-based speech-to-speech communication with automatic reconnection
  */
 
 import { EventEmitter } from 'events';
@@ -13,58 +13,210 @@ interface RealtimeEvent {
   [key: string]: any;
 }
 
+interface ReconnectionConfig {
+  enabled: boolean;
+  maxAttempts: number;
+  initialDelayMs: number;
+  maxDelayMs: number;
+  backoffMultiplier: number;
+}
+
+const DEFAULT_RECONNECTION_CONFIG: ReconnectionConfig = {
+  enabled: true,
+  maxAttempts: 5,
+  initialDelayMs: 1000,
+  maxDelayMs: 30000,
+  backoffMultiplier: 2,
+};
+
 export class RealtimeClient extends EventEmitter {
   private ws: WebSocket | null = null;
   private config: RealtimeConfig;
+  private reconnectionConfig: ReconnectionConfig;
   private isConnected: boolean = false;
   private sessionId: string | null = null;
 
-  constructor(config: RealtimeConfig) {
+  // Reconnection state
+  private reconnectAttempts: number = 0;
+  private reconnectTimeout: NodeJS.Timeout | null = null;
+  private isReconnecting: boolean = false;
+  private intentionalDisconnect: boolean = false;
+  private connectionPromise: Promise<void> | null = null;
+
+  constructor(config: RealtimeConfig, reconnectionConfig?: Partial<ReconnectionConfig>) {
     super();
     this.config = config;
+    this.reconnectionConfig = { ...DEFAULT_RECONNECTION_CONFIG, ...reconnectionConfig };
   }
 
-  async connect() {
+  /**
+   * Connect to the Realtime API with automatic reconnection support
+   */
+  async connect(): Promise<void> {
     if (this.isConnected) {
       logger.warn('Realtime client already connected');
       return;
     }
 
-    const url = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01';
+    // If already connecting, return the existing promise
+    if (this.connectionPromise) {
+      return this.connectionPromise;
+    }
+
+    this.intentionalDisconnect = false;
+    this.connectionPromise = this.establishConnection();
 
     try {
-      this.ws = new WebSocket(url, {
-        headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
-          'OpenAI-Beta': 'realtime=v1',
-        },
-      });
-
-      this.ws.on('open', () => {
-        logger.info('Realtime API connected');
-        this.isConnected = true;
-        this.initializeSession();
-      });
-
-      this.ws.on('message', (data: WebSocket.Data) => {
-        this.handleMessage(data);
-      });
-
-      this.ws.on('error', (error) => {
-        logger.error('Realtime API error', { error: error.message });
-        this.emit('error', error);
-      });
-
-      this.ws.on('close', () => {
-        logger.info('Realtime API disconnected');
-        this.isConnected = false;
-        this.emit('disconnected');
-      });
-
-    } catch (error) {
-      logger.error('Failed to connect to Realtime API', { error });
-      throw error;
+      await this.connectionPromise;
+    } finally {
+      this.connectionPromise = null;
     }
+  }
+
+  private async establishConnection(): Promise<void> {
+    const url = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01';
+
+    return new Promise((resolve, reject) => {
+      try {
+        logger.info('Connecting to Realtime API...', {
+          attempt: this.reconnectAttempts + 1,
+          maxAttempts: this.reconnectionConfig.maxAttempts,
+        });
+
+        this.ws = new WebSocket(url, {
+          headers: {
+            'Authorization': `Bearer ${this.config.apiKey}`,
+            'OpenAI-Beta': 'realtime=v1',
+          },
+        });
+
+        const connectionTimeout = setTimeout(() => {
+          if (!this.isConnected) {
+            this.ws?.close();
+            reject(new Error('Connection timeout'));
+          }
+        }, 30000); // 30 second connection timeout
+
+        this.ws.on('open', () => {
+          clearTimeout(connectionTimeout);
+          logger.info('Realtime API connected');
+          this.isConnected = true;
+          this.isReconnecting = false;
+          this.reconnectAttempts = 0;
+          this.initializeSession();
+          resolve();
+        });
+
+        this.ws.on('message', (data: WebSocket.Data) => {
+          this.handleMessage(data);
+        });
+
+        this.ws.on('error', (error) => {
+          clearTimeout(connectionTimeout);
+          logger.error('Realtime API error', { error: error.message });
+          this.emit('error', error);
+
+          // Only reject if we haven't connected yet
+          if (!this.isConnected) {
+            reject(error);
+          }
+        });
+
+        this.ws.on('close', (code, reason) => {
+          clearTimeout(connectionTimeout);
+          const wasConnected = this.isConnected;
+          this.isConnected = false;
+
+          logger.info('Realtime API disconnected', {
+            code,
+            reason: reason?.toString(),
+            intentional: this.intentionalDisconnect,
+          });
+
+          this.emit('disconnected', { code, reason: reason?.toString() });
+
+          // Only attempt reconnection if:
+          // 1. Reconnection is enabled
+          // 2. This was not an intentional disconnect
+          // 3. We were previously connected (not a failed initial connection)
+          if (this.reconnectionConfig.enabled && !this.intentionalDisconnect && wasConnected) {
+            this.scheduleReconnection();
+          }
+        });
+
+      } catch (error) {
+        logger.error('Failed to connect to Realtime API', { error });
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Schedule a reconnection attempt with exponential backoff
+   */
+  private scheduleReconnection(): void {
+    if (this.isReconnecting || this.intentionalDisconnect) {
+      return;
+    }
+
+    if (this.reconnectAttempts >= this.reconnectionConfig.maxAttempts) {
+      logger.error('Max reconnection attempts reached', {
+        attempts: this.reconnectAttempts,
+        maxAttempts: this.reconnectionConfig.maxAttempts,
+      });
+      this.emit('reconnection.failed', {
+        attempts: this.reconnectAttempts,
+        maxAttempts: this.reconnectionConfig.maxAttempts,
+      });
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+
+    // Calculate delay with exponential backoff
+    const delay = Math.min(
+      this.reconnectionConfig.initialDelayMs * Math.pow(this.reconnectionConfig.backoffMultiplier, this.reconnectAttempts - 1),
+      this.reconnectionConfig.maxDelayMs
+    );
+
+    logger.info('Scheduling reconnection', {
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.reconnectionConfig.maxAttempts,
+      delayMs: delay,
+    });
+
+    this.emit('reconnecting', {
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.reconnectionConfig.maxAttempts,
+      delayMs: delay,
+    });
+
+    this.reconnectTimeout = setTimeout(async () => {
+      this.reconnectTimeout = null;
+
+      try {
+        await this.establishConnection();
+        logger.info('Reconnection successful', { attempt: this.reconnectAttempts });
+        this.emit('reconnected', { attempt: this.reconnectAttempts });
+      } catch (error) {
+        logger.error('Reconnection failed', { attempt: this.reconnectAttempts, error });
+        this.isReconnecting = false;
+        // Schedule another reconnection attempt
+        this.scheduleReconnection();
+      }
+    }, delay);
+  }
+
+  /**
+   * Cancel any pending reconnection attempts
+   */
+  private cancelReconnection(): void {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    this.isReconnecting = false;
   }
 
   private initializeSession() {
@@ -271,7 +423,14 @@ When executing system commands, confirm actions and provide status updates.`;
     }
   }
 
-  disconnect() {
+  /**
+   * Disconnect from the Realtime API
+   * @param intentional - If true, will not attempt to reconnect
+   */
+  disconnect(intentional: boolean = true) {
+    this.intentionalDisconnect = intentional;
+    this.cancelReconnection();
+
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -280,7 +439,30 @@ When executing system commands, confirm actions and provide status updates.`;
     }
   }
 
+  /**
+   * Check if the client is currently connected
+   */
   isActive(): boolean {
     return this.isConnected;
+  }
+
+  /**
+   * Get reconnection status
+   */
+  getReconnectionStatus(): { isReconnecting: boolean; attempts: number; maxAttempts: number } {
+    return {
+      isReconnecting: this.isReconnecting,
+      attempts: this.reconnectAttempts,
+      maxAttempts: this.reconnectionConfig.maxAttempts,
+    };
+  }
+
+  /**
+   * Manually trigger a reconnection attempt
+   */
+  async reconnect(): Promise<void> {
+    this.disconnect(false);
+    this.reconnectAttempts = 0;
+    await this.connect();
   }
 }

@@ -1,6 +1,7 @@
 /**
  * JARVIS Voice Agent - Fallback Chain
  * Whisper → GPT-4o-mini → ElevenLabs pipeline for cost-efficient mode
+ * Includes retry mechanisms with exponential backoff for API resilience
  */
 
 import { EventEmitter } from 'events';
@@ -18,17 +19,41 @@ export interface FallbackChainConfig {
   elevenlabsVoiceId: string;
   systemPrompt?: string;
   tools?: FunctionDefinition[];
+  retryConfig?: Partial<RetryConfig>;
+}
+
+interface RetryConfig {
+  maxRetries: number;
+  initialDelayMs: number;
+  maxDelayMs: number;
+  backoffMultiplier: number;
+  retryableStatusCodes: number[];
+}
+
+const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  maxRetries: 3,
+  initialDelayMs: 1000,
+  maxDelayMs: 10000,
+  backoffMultiplier: 2,
+  retryableStatusCodes: [408, 429, 500, 502, 503, 504],
+};
+
+interface RetryableError extends Error {
+  status?: number;
+  code?: string;
 }
 
 export class FallbackChain extends EventEmitter {
   private openai: OpenAI;
   private elevenlabs: ElevenLabsClient;
   private config: FallbackChainConfig;
+  private retryConfig: RetryConfig;
   private conversationHistory: Array<{ role: string; content: string }> = [];
 
   constructor(config: FallbackChainConfig) {
     super();
     this.config = config;
+    this.retryConfig = { ...DEFAULT_RETRY_CONFIG, ...config.retryConfig };
 
     this.openai = new OpenAI({
       apiKey: config.openaiApiKey,
@@ -48,27 +73,136 @@ export class FallbackChain extends EventEmitter {
   }
 
   /**
+   * Execute an async operation with retry logic
+   */
+  private async withRetry<T>(
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= this.retryConfig.maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          const delay = this.calculateRetryDelay(attempt);
+          logger.info(`Retrying ${operationName}`, {
+            attempt,
+            maxRetries: this.retryConfig.maxRetries,
+            delayMs: delay,
+          });
+          this.emit('retry', { operation: operationName, attempt, delay });
+          await this.sleep(delay);
+        }
+
+        return await operation();
+      } catch (error: any) {
+        lastError = error;
+
+        if (!this.isRetryableError(error)) {
+          logger.error(`Non-retryable error in ${operationName}`, {
+            error: error.message,
+            status: error.status,
+            code: error.code,
+          });
+          throw error;
+        }
+
+        logger.warn(`Retryable error in ${operationName}`, {
+          attempt,
+          error: error.message,
+          status: error.status,
+          code: error.code,
+        });
+
+        if (attempt === this.retryConfig.maxRetries) {
+          logger.error(`Max retries reached for ${operationName}`, {
+            attempts: attempt + 1,
+            lastError: error.message,
+          });
+          throw error;
+        }
+      }
+    }
+
+    // Should never reach here, but TypeScript needs this
+    throw lastError || new Error(`Unknown error in ${operationName}`);
+  }
+
+  /**
+   * Check if an error is retryable
+   */
+  private isRetryableError(error: RetryableError): boolean {
+    // Network errors
+    if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND') {
+      return true;
+    }
+
+    // Rate limiting
+    if (error.status === 429) {
+      return true;
+    }
+
+    // Server errors
+    if (error.status && this.retryConfig.retryableStatusCodes.includes(error.status)) {
+      return true;
+    }
+
+    // OpenAI specific errors
+    if (error.message?.includes('overloaded') || error.message?.includes('rate limit')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Calculate delay for retry attempt with exponential backoff
+   */
+  private calculateRetryDelay(attempt: number): number {
+    const delay = this.retryConfig.initialDelayMs * Math.pow(this.retryConfig.backoffMultiplier, attempt - 1);
+    // Add jitter (±20%)
+    const jitter = delay * 0.2 * (Math.random() * 2 - 1);
+    return Math.min(delay + jitter, this.retryConfig.maxDelayMs);
+  }
+
+  /**
+   * Sleep for a given number of milliseconds
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
    * Process a complete interaction through the fallback chain
    * @param audioBuffer - Audio buffer in 16kHz PCM format
    * @returns Audio response as a buffer
    */
   async processAudio(audioBuffer: Buffer): Promise<{ audioBuffer: Buffer; text: string; cost: number }> {
     try {
-      // Step 1: Whisper transcription
+      // Step 1: Whisper transcription (with retry)
       this.emit('stage', 'transcribing');
-      const transcription = await this.transcribeAudio(audioBuffer);
+      const transcription = await this.withRetry(
+        () => this.transcribeAudio(audioBuffer),
+        'whisper-transcription'
+      );
       logger.info('Transcription completed', { text: transcription });
       this.emit('transcription', transcription);
 
-      // Step 2: GPT-4o-mini reasoning
+      // Step 2: GPT-4o-mini reasoning (with retry)
       this.emit('stage', 'reasoning');
-      const response = await this.generateResponse(transcription);
+      const response = await this.withRetry(
+        () => this.generateResponse(transcription),
+        'gpt-completion'
+      );
       logger.info('Response generated', { text: response.text });
       this.emit('response', response.text);
 
-      // Step 3: ElevenLabs TTS
+      // Step 3: ElevenLabs TTS (with retry)
       this.emit('stage', 'synthesizing');
-      const audioResponse = await this.synthesizeSpeech(response.text);
+      const audioResponse = await this.withRetry(
+        () => this.synthesizeSpeech(response.text),
+        'elevenlabs-tts'
+      );
       logger.info('Speech synthesized', { bytes: audioResponse.length });
       this.emit('audio', audioResponse);
 
@@ -113,16 +247,27 @@ export class FallbackChain extends EventEmitter {
       });
 
       // Clean up temp file
-      fs.unlinkSync(tempFile);
+      this.cleanupTempFile(tempFile);
 
       return transcription.text;
 
     } catch (error) {
       // Clean up temp file on error
-      if (fs.existsSync(tempFile)) {
-        fs.unlinkSync(tempFile);
-      }
+      this.cleanupTempFile(tempFile);
       throw error;
+    }
+  }
+
+  /**
+   * Safely clean up a temporary file
+   */
+  private cleanupTempFile(filePath: string): void {
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (error) {
+      logger.warn('Failed to clean up temp file', { filePath, error });
     }
   }
 
@@ -180,20 +325,32 @@ export class FallbackChain extends EventEmitter {
    * Step 3: Synthesize speech using ElevenLabs
    */
   private async synthesizeSpeech(text: string): Promise<Buffer> {
+    // Handle empty text gracefully
+    if (!text || text.trim().length === 0) {
+      logger.warn('Empty text provided for speech synthesis, returning silence');
+      return Buffer.alloc(0);
+    }
+
     const audioStream = await this.elevenlabs.generate({
       voice: this.config.elevenlabsVoiceId,
       text: text,
       model_id: 'eleven_monolingual_v1',
     });
 
-    // Convert stream to buffer
+    // Convert stream to buffer with timeout
     const chunks: Buffer[] = [];
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Speech synthesis timeout')), 30000);
+    });
 
-    for await (const chunk of audioStream) {
-      chunks.push(chunk);
-    }
+    const streamPromise = (async () => {
+      for await (const chunk of audioStream) {
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks);
+    })();
 
-    return Buffer.concat(chunks);
+    return Promise.race([streamPromise, timeoutPromise]);
   }
 
   /**
@@ -267,5 +424,20 @@ export class FallbackChain extends EventEmitter {
    */
   getHistory() {
     return [...this.conversationHistory];
+  }
+
+  /**
+   * Get retry configuration
+   */
+  getRetryConfig(): RetryConfig {
+    return { ...this.retryConfig };
+  }
+
+  /**
+   * Update retry configuration
+   */
+  setRetryConfig(config: Partial<RetryConfig>): void {
+    this.retryConfig = { ...this.retryConfig, ...config };
+    logger.info('Retry configuration updated', { config: this.retryConfig });
   }
 }
