@@ -17,83 +17,233 @@ body {
 .app {
   width: 400px;
   height: 600px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
   border-radius: 20px;
   padding: 20px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5),
+              inset 0 1px 0 rgba(255, 255, 255, 0.1);
   color: white;
   display: flex;
   flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .header {
   text-align: center;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
 }
 
 .header h1 {
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 700;
-  letter-spacing: 2px;
+  letter-spacing: 4px;
   margin-bottom: 10px;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(135deg, #00d4ff, #7c3aed, #f472b6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-shadow: 0 0 30px rgba(0, 212, 255, 0.3);
+}
+
+.status-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
 }
 
 .status {
   display: inline-block;
   padding: 8px 16px;
   border-radius: 20px;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 1px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
+
+/* ==================== Audio Visualizer ==================== */
+
+.audio-visualizer {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 30px;
+  padding: 0 8px;
+}
+
+.visualizer-bar {
+  width: 4px;
+  background: linear-gradient(to top, #00d4ff, #7c3aed);
+  border-radius: 2px;
+  transition: height 0.1s ease;
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+}
+
+.audio-visualizer.active .visualizer-bar {
+  animation: visualize 0.5s ease infinite alternate;
+}
+
+@keyframes visualize {
+  0% {
+    transform: scaleY(0.3);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+/* ==================== Speaking Orb ==================== */
+
+.visualization-section {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100px;
+  margin-bottom: 10px;
+}
+
+.speaking-orb {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.orb-core {
+  width: 30px;
+  height: 30px;
+  background: radial-gradient(circle, #00d4ff 0%, #0066ff 50%, #1a1a2e 100%);
+  border-radius: 50%;
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.5),
+              0 0 40px rgba(0, 212, 255, 0.3);
+  transition: all 0.3s ease;
+}
+
+.speaking-orb.active .orb-core {
+  width: 40px;
+  height: 40px;
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.8),
+              0 0 60px rgba(0, 212, 255, 0.5),
+              0 0 90px rgba(0, 212, 255, 0.3);
+  animation: pulse-core 1s ease-in-out infinite;
+}
+
+@keyframes pulse-core {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+.orb-ring {
+  position: absolute;
+  border: 2px solid rgba(0, 212, 255, 0.3);
+  border-radius: 50%;
+  opacity: 0;
+  transition: all 0.3s ease;
+}
+
+.speaking-orb.active .orb-ring {
+  animation: ripple 2s linear infinite;
+}
+
+.ring-1 {
+  width: 50px;
+  height: 50px;
+}
+
+.ring-2 {
+  width: 70px;
+  height: 70px;
+  animation-delay: 0.5s !important;
+}
+
+.ring-3 {
+  width: 90px;
+  height: 90px;
+  animation-delay: 1s !important;
+}
+
+@keyframes ripple {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+/* ==================== Mode Indicator ==================== */
 
 .mode-indicator {
   text-align: center;
-  margin-bottom: 20px;
+  margin-bottom: 15px;
 }
 
 .mode {
   display: inline-block;
   padding: 6px 12px;
   border-radius: 12px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .mode.premium {
-  background: rgba(255, 215, 0, 0.3);
+  background: rgba(255, 215, 0, 0.2);
   color: #FFD700;
+  border-color: rgba(255, 215, 0, 0.3);
+  box-shadow: 0 0 15px rgba(255, 215, 0, 0.2);
 }
 
 .mode.efficient {
-  background: rgba(76, 175, 80, 0.3);
+  background: rgba(76, 175, 80, 0.2);
   color: #4CAF50;
+  border-color: rgba(76, 175, 80, 0.3);
+  box-shadow: 0 0 15px rgba(76, 175, 80, 0.2);
 }
+
+/* ==================== Metrics ==================== */
 
 .metrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 15px;
 }
 
 .metric {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(10px);
-  padding: 12px;
+  padding: 10px;
   border-radius: 12px;
   text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.3s ease;
+}
+
+.metric:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(0, 212, 255, 0.3);
 }
 
 .metric .label {
   display: block;
-  font-size: 11px;
-  opacity: 0.8;
+  font-size: 10px;
+  opacity: 0.7;
   margin-bottom: 4px;
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -101,60 +251,186 @@ body {
 
 .metric .value {
   display: block;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
+  color: #00d4ff;
 }
+
+/* ==================== Messages ==================== */
 
 .messages {
   flex: 1;
   overflow-y: auto;
-  margin-bottom: 20px;
+  margin-bottom: 15px;
   padding: 10px;
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(10px);
   border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.empty-messages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  opacity: 0.5;
+  font-size: 13px;
+  text-align: center;
+  padding: 20px;
 }
 
 .message {
-  margin-bottom: 12px;
-  padding: 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .message.user {
-  background: rgba(33, 150, 243, 0.3);
+  background: rgba(0, 212, 255, 0.15);
+  border-color: rgba(0, 212, 255, 0.2);
+  margin-right: 20px;
 }
 
 .message.assistant {
-  background: rgba(156, 39, 176, 0.3);
+  background: rgba(124, 58, 237, 0.15);
+  border-color: rgba(124, 58, 237, 0.2);
+  margin-left: 20px;
 }
 
 .message .role {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   margin-bottom: 4px;
-  opacity: 0.8;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.message.user .role {
+  color: #00d4ff;
+}
+
+.message.assistant .role {
+  color: #a78bfa;
 }
 
 .message .content {
-  font-size: 14px;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.5;
 }
+
+/* ==================== Controls ==================== */
 
 .controls {
-  text-align: center;
+  margin-top: auto;
 }
 
+.control-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.control-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.control-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.1);
+}
+
+.control-btn:active {
+  transform: scale(0.95);
+}
+
+/* Mute button states */
+.mute-btn.muted {
+  background: rgba(244, 67, 54, 0.3);
+  border-color: rgba(244, 67, 54, 0.5);
+  color: #f44336;
+}
+
+.mute-btn.muted:hover {
+  background: rgba(244, 67, 54, 0.4);
+}
+
+/* Auto-mute button */
+.auto-mute-btn {
+  position: relative;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.auto-mute-icon {
+  font-size: 14px;
+}
+
+.auto-mute-status {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  color: #4CAF50;
+}
+
+.auto-mute-btn.enabled {
+  background: rgba(76, 175, 80, 0.2);
+  border-color: rgba(76, 175, 80, 0.4);
+}
+
+.auto-mute-btn.enabled:hover {
+  background: rgba(76, 175, 80, 0.3);
+}
+
+/* Clear button */
+.clear-btn {
+  opacity: 0.7;
+}
+
+.clear-btn:hover {
+  opacity: 1;
+  background: rgba(244, 67, 54, 0.2);
+  border-color: rgba(244, 67, 54, 0.3);
+}
+
+/* Wake button */
 .wake-btn {
-  padding: 14px 28px;
-  font-size: 16px;
+  padding: 12px 24px;
+  font-size: 13px;
   font-weight: 600;
   color: white;
-  background: rgba(255, 255, 255, 0.2);
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.3), rgba(124, 58, 237, 0.3));
   backdrop-filter: blur(10px);
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 25px;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -163,30 +439,46 @@ body {
 }
 
 .wake-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.5), rgba(124, 58, 237, 0.5));
   transform: scale(1.05);
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 5px 20px rgba(0, 212, 255, 0.3);
 }
 
 .wake-btn:active {
   transform: scale(0.98);
 }
 
-/* Scrollbar styling */
+/* ==================== Scrollbar ==================== */
+
 .messages::-webkit-scrollbar {
   width: 6px;
 }
 
 .messages::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
   border-radius: 3px;
 }
 
 .messages::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(0, 212, 255, 0.3);
   border-radius: 3px;
 }
 
 .messages::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(0, 212, 255, 0.5);
+}
+
+/* ==================== Listening Animation ==================== */
+
+@keyframes listening-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 15px rgba(76, 175, 80, 0);
+  }
+}
+
+.status[style*="rgb(76, 175, 80)"] {
+  animation: listening-pulse 2s infinite;
 }

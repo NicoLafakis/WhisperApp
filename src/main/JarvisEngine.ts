@@ -198,12 +198,14 @@ export class JarvisEngine extends EventEmitter {
     });
 
     this.realtimeClient.on('response.done', () => {
-      this.updateStatus('idle');
       this.audioBuffer = [];
 
       // Record cost
       this.costTracker.recordRealtimeInteraction(5, 1000); // Estimate
       this.updateMetrics();
+
+      // Finish the interaction (handles audio cleanup and events)
+      this.finishInteraction();
     });
   }
 
@@ -262,6 +264,9 @@ export class JarvisEngine extends EventEmitter {
     this.updateStatus('listening');
     this.audioBuffer = [];
 
+    // Emit wake word event for auto-mute functionality
+    this.emit('wakeword');
+
     // Re-evaluate routing decision
     const routingDecision = this.adaptiveRouter.route();
 
@@ -301,11 +306,13 @@ export class JarvisEngine extends EventEmitter {
       } else if (this.currentMode === 'efficient' && this.fallbackChain) {
         this.updateStatus('thinking');
         await this.fallbackChain.processAudio(fullAudioBuffer);
-        this.updateStatus('idle');
+        // Finish interaction for fallback mode
+        this.finishInteraction();
       }
     } catch (error) {
       logger.error('Failed to process audio', { error });
       this.updateStatus('error');
+      this.emit('interaction:complete'); // Still emit complete on error
     }
 
     this.audioBuffer = [];
@@ -335,6 +342,8 @@ export class JarvisEngine extends EventEmitter {
     }
   }
 
+  private isPlayingAudio: boolean = false;
+
   private playAudio(audioChunk: Buffer) {
     try {
       if (!this.speaker) {
@@ -343,12 +352,39 @@ export class JarvisEngine extends EventEmitter {
           bitDepth: 16,
           sampleRate: 24000, // Realtime API outputs 24kHz
         });
+
+        // Track when audio playback finishes
+        this.speaker.on('close', () => {
+          this.isPlayingAudio = false;
+          this.emit('audio:stopped');
+          logger.debug('Audio playback finished');
+        });
+      }
+
+      // Emit audio playing event if not already playing
+      if (!this.isPlayingAudio) {
+        this.isPlayingAudio = true;
+        this.emit('audio:playing');
+        logger.debug('Audio playback started');
       }
 
       this.speaker.write(audioChunk);
     } catch (error) {
       logger.error('Failed to play audio', { error });
     }
+  }
+
+  private finishInteraction() {
+    // Close speaker to finish audio playback
+    if (this.speaker) {
+      this.speaker.end();
+      this.speaker = null;
+    }
+
+    this.isPlayingAudio = false;
+    this.emit('audio:stopped');
+    this.emit('interaction:complete');
+    this.updateStatus('idle');
   }
 
   private updateStatus(status: AgentStatus) {

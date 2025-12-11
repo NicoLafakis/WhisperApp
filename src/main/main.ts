@@ -4,12 +4,21 @@
 
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } from 'electron';
 import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { JarvisEngine } from './JarvisEngine';
 import { logger } from '../shared/utils/logger';
+
+const execAsync = promisify(exec);
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let jarvisEngine: JarvisEngine | null = null;
+
+// Audio mute state
+let isSystemMuted: boolean = false;
+let previousVolume: number = 50;
+let autoMuteEnabled: boolean = true;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -87,6 +96,13 @@ function createTray() {
     },
     { type: 'separator' },
     {
+      label: isSystemMuted ? 'Unmute System Audio' : 'Mute System Audio',
+      click: () => {
+        toggleSystemMute();
+      },
+    },
+    { type: 'separator' },
+    {
       label: 'Quit',
       click: () => {
         app.quit();
@@ -108,6 +124,54 @@ function createTray() {
     }
   });
 }
+
+// ==================== Audio Mute Functions ====================
+
+async function getSystemVolume(): Promise<number> {
+  try {
+    const { stdout } = await execAsync(
+      'powershell.exe -NoProfile -Command "(Get-AudioDevice -PlaybackVolume).Volume"'
+    );
+    return parseInt(stdout.trim(), 10) || 50;
+  } catch (error) {
+    logger.warn('Failed to get system volume, using default');
+    return 50;
+  }
+}
+
+async function setSystemMute(mute: boolean): Promise<void> {
+  try {
+    if (mute) {
+      // Store current volume before muting
+      previousVolume = await getSystemVolume();
+      // Mute using nircmd (more reliable) or PowerShell fallback
+      await execAsync('powershell.exe -NoProfile -Command "$obj = New-Object -ComObject WScript.Shell; $obj.SendKeys([char]173)"');
+    } else {
+      // Unmute
+      await execAsync('powershell.exe -NoProfile -Command "$obj = New-Object -ComObject WScript.Shell; $obj.SendKeys([char]173)"');
+    }
+
+    isSystemMuted = mute;
+    logger.info('System mute toggled', { muted: isSystemMuted });
+
+    // Notify renderer
+    if (mainWindow) {
+      mainWindow.webContents.send('audio:mute-changed', isSystemMuted);
+    }
+
+    // Update tray menu
+    createTray();
+  } catch (error) {
+    logger.error('Failed to set system mute', { error });
+  }
+}
+
+async function toggleSystemMute(): Promise<boolean> {
+  await setSystemMute(!isSystemMuted);
+  return isSystemMuted;
+}
+
+// ==================== Initialize JARVIS ====================
 
 function initializeJarvis() {
   jarvisEngine = new JarvisEngine();
@@ -138,13 +202,43 @@ function initializeJarvis() {
     }
   });
 
+  // Audio playback events for visualization
+  jarvisEngine.on('audio:playing', () => {
+    if (mainWindow) {
+      mainWindow.webContents.send('audio:playing', { intensity: 0.7 });
+    }
+  });
+
+  jarvisEngine.on('audio:stopped', () => {
+    if (mainWindow) {
+      mainWindow.webContents.send('audio:stopped');
+    }
+  });
+
+  // Wake word detected - auto-mute if enabled
+  jarvisEngine.on('wakeword', async () => {
+    if (autoMuteEnabled && !isSystemMuted) {
+      logger.info('Auto-muting system audio on wake word');
+      await setSystemMute(true);
+    }
+  });
+
+  // Interaction complete - auto-unmute if we auto-muted
+  jarvisEngine.on('interaction:complete', async () => {
+    if (autoMuteEnabled && isSystemMuted) {
+      logger.info('Auto-unmuting system audio after interaction');
+      await setSystemMute(false);
+    }
+  });
+
   // Auto-start JARVIS
   jarvisEngine.start().catch((error) => {
     logger.error('Failed to start JARVIS', { error });
   });
 }
 
-// IPC handlers
+// ==================== IPC Handlers ====================
+
 function setupIPC() {
   ipcMain.handle('agent:start', async () => {
     if (jarvisEngine) {
@@ -177,9 +271,34 @@ function setupIPC() {
     // Return cost metrics
     return jarvisEngine?.getState().metrics || null;
   });
+
+  // Audio mute handlers
+  ipcMain.handle('audio:toggle-mute', async () => {
+    return await toggleSystemMute();
+  });
+
+  ipcMain.handle('audio:get-mute-state', () => {
+    return isSystemMuted;
+  });
+
+  ipcMain.handle('audio:set-mute', async (_event, mute: boolean) => {
+    await setSystemMute(mute);
+    return isSystemMuted;
+  });
+
+  ipcMain.handle('audio:set-auto-mute', (_event, enabled: boolean) => {
+    autoMuteEnabled = enabled;
+    logger.info('Auto-mute setting changed', { enabled });
+    return autoMuteEnabled;
+  });
+
+  ipcMain.handle('audio:get-auto-mute', () => {
+    return autoMuteEnabled;
+  });
 }
 
-// App lifecycle
+// ==================== App Lifecycle ====================
+
 app.whenReady().then(() => {
   createWindow();
   createTray();
@@ -193,7 +312,12 @@ app.on('window-all-closed', () => {
   // Don't quit on window close - keep running in tray
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
+  // Restore audio if muted
+  if (isSystemMuted) {
+    await setSystemMute(false);
+  }
+
   if (jarvisEngine) {
     jarvisEngine.stop();
   }
