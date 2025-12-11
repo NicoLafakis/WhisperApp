@@ -15,25 +15,29 @@
     "start": "electron dist/main/main.js",
     "package": "electron-builder",
     "lint": "eslint . --ext .ts,.tsx",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
+    "@picovoice/porcupine-node": "^3.0.0",
     "axios": "^1.6.2",
     "dotenv": "^16.3.1",
     "electron-store": "^8.1.0",
     "elevenlabs": "^0.8.1",
-    "openai": "^4.63.0",
-    "ws": "^8.16.0",
-    "node-record-lpcm16": "^1.0.1",
-    "speaker": "^0.5.4",
-    "@picovoice/porcupine-node": "^3.0.0",
-    "sqlite3": "^5.1.7",
     "node-powershell": "^5.0.1",
+    "node-record-lpcm16": "^1.0.1",
     "node-windows": "^1.0.0-beta.8",
-    "wav": "^1.0.2"
+    "openai": "^4.63.0",
+    "speaker": "^0.5.4",
+    "sqlite3": "^5.1.7",
+    "wav": "^1.0.2",
+    "ws": "^8.16.0"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.10.4",
     "@types/react": "^18.2.42",
     "@types/react-dom": "^18.2.17",
@@ -45,8 +49,10 @@
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1",
     "eslint": "^8.55.0",
+    "jest": "^30.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.3.3",
     "vite": "^5.0.7",
     "vite-plugin-electron": "^0.28.0"
