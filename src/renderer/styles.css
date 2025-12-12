@@ -4,6 +4,21 @@
   box-sizing: border-box;
 }
 
+:root {
+  --bg-primary: #18181b;
+  --bg-secondary: #27272a;
+  --bg-tertiary: #3f3f46;
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --accent: #22d3ee;
+  --accent-muted: rgba(34, 211, 238, 0.15);
+  --border: #3f3f46;
+  --error: #ef4444;
+  --success: #22c55e;
+  --warning: #eab308;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
@@ -17,32 +32,26 @@ body {
 .app {
   width: 400px;
   height: 600px;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  border-radius: 20px;
+  background: var(--bg-primary);
+  border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5),
-              inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  color: white;
+  color: var(--text-primary);
   display: flex;
   flex-direction: column;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
 }
 
 .header {
   text-align: center;
-  margin-bottom: 10px;
+  margin-bottom: 16px;
 }
 
 .header h1 {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: 4px;
-  margin-bottom: 10px;
-  background: linear-gradient(135deg, #00d4ff, #7c3aed, #f472b6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  text-shadow: 0 0 30px rgba(0, 212, 255, 0.3);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  color: var(--text-primary);
+  margin-bottom: 12px;
 }
 
 .status-container {
@@ -54,13 +63,14 @@ body {
 
 .status {
   display: inline-block;
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  letter-spacing: 0.5px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
 }
 
 /* ==================== Audio Visualizer ==================== */
@@ -68,17 +78,16 @@ body {
 .audio-visualizer {
   display: flex;
   align-items: center;
-  gap: 3px;
-  height: 30px;
+  gap: 2px;
+  height: 24px;
   padding: 0 8px;
 }
 
 .visualizer-bar {
-  width: 4px;
-  background: linear-gradient(to top, #00d4ff, #7c3aed);
-  border-radius: 2px;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 1px;
   transition: height 0.1s ease;
-  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
 }
 
 .audio-visualizer.active .visualizer-bar {
@@ -102,50 +111,49 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100px;
-  margin-bottom: 10px;
+  height: 80px;
+  margin-bottom: 12px;
 }
 
 .speaking-orb {
   position: relative;
-  width: 60px;
-  height: 60px;
+  width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .orb-core {
-  width: 30px;
-  height: 30px;
-  background: radial-gradient(circle, #00d4ff 0%, #0066ff 50%, #1a1a2e 100%);
+  width: 24px;
+  height: 24px;
+  background: var(--accent);
   border-radius: 50%;
-  box-shadow: 0 0 20px rgba(0, 212, 255, 0.5),
-              0 0 40px rgba(0, 212, 255, 0.3);
   transition: all 0.3s ease;
+  opacity: 0.8;
 }
 
 .speaking-orb.active .orb-core {
-  width: 40px;
-  height: 40px;
-  box-shadow: 0 0 30px rgba(0, 212, 255, 0.8),
-              0 0 60px rgba(0, 212, 255, 0.5),
-              0 0 90px rgba(0, 212, 255, 0.3);
-  animation: pulse-core 1s ease-in-out infinite;
+  width: 32px;
+  height: 32px;
+  opacity: 1;
+  animation: pulse-core 1.5s ease-in-out infinite;
 }
 
 @keyframes pulse-core {
   0%, 100% {
     transform: scale(1);
+    opacity: 1;
   }
   50% {
     transform: scale(1.1);
+    opacity: 0.8;
   }
 }
 
 .orb-ring {
   position: absolute;
-  border: 2px solid rgba(0, 212, 255, 0.3);
+  border: 1px solid var(--accent);
   border-radius: 50%;
   opacity: 0;
   transition: all 0.3s ease;
@@ -156,29 +164,29 @@ body {
 }
 
 .ring-1 {
-  width: 50px;
-  height: 50px;
+  width: 40px;
+  height: 40px;
 }
 
 .ring-2 {
-  width: 70px;
-  height: 70px;
+  width: 56px;
+  height: 56px;
   animation-delay: 0.5s !important;
 }
 
 .ring-3 {
-  width: 90px;
-  height: 90px;
+  width: 72px;
+  height: 72px;
   animation-delay: 1s !important;
 }
 
 @keyframes ripple {
   0% {
     transform: scale(0.5);
-    opacity: 0.8;
+    opacity: 0.6;
   }
   100% {
-    transform: scale(1.5);
+    transform: scale(1.2);
     opacity: 0;
   }
 }
@@ -187,33 +195,30 @@ body {
 
 .mode-indicator {
   text-align: center;
-  margin-bottom: 15px;
+  margin-bottom: 12px;
 }
 
 .mode {
   display: inline-block;
-  padding: 6px 12px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
   text-transform: uppercase;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  letter-spacing: 0.5px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
 }
 
 .mode.premium {
-  background: rgba(255, 215, 0, 0.2);
-  color: #FFD700;
-  border-color: rgba(255, 215, 0, 0.3);
-  box-shadow: 0 0 15px rgba(255, 215, 0, 0.2);
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-muted);
 }
 
 .mode.efficient {
-  background: rgba(76, 175, 80, 0.2);
-  color: #4CAF50;
-  border-color: rgba(76, 175, 80, 0.3);
-  box-shadow: 0 0 15px rgba(76, 175, 80, 0.2);
+  color: var(--text-secondary);
 }
 
 /* ==================== Metrics ==================== */
@@ -221,39 +226,33 @@ body {
 .metrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-bottom: 15px;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .metric {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  padding: 10px;
-  border-radius: 12px;
+  background: var(--bg-secondary);
+  padding: 10px 8px;
+  border-radius: 6px;
   text-align: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all 0.3s ease;
-}
-
-.metric:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(0, 212, 255, 0.3);
+  border: 1px solid var(--border);
 }
 
 .metric .label {
   display: block;
-  font-size: 10px;
-  opacity: 0.7;
+  font-size: 9px;
+  color: var(--text-muted);
   margin-bottom: 4px;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
 }
 
 .metric .value {
   display: block;
-  font-size: 16px;
-  font-weight: 700;
-  color: #00d4ff;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ==================== Messages ==================== */
@@ -261,12 +260,11 @@ body {
 .messages {
   flex: 1;
   overflow-y: auto;
-  margin-bottom: 15px;
-  padding: 10px;
-  background: rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(10px);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 12px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--border);
 }
 
 .empty-messages {
@@ -274,25 +272,25 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  opacity: 0.5;
-  font-size: 13px;
+  color: var(--text-muted);
+  font-size: 12px;
   text-align: center;
   padding: 20px;
 }
 
 .message {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  animation: fadeIn 0.3s ease;
+  border-radius: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  animation: fadeIn 0.2s ease;
 }
 
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
@@ -301,38 +299,36 @@ body {
 }
 
 .message.user {
-  background: rgba(0, 212, 255, 0.15);
-  border-color: rgba(0, 212, 255, 0.2);
-  margin-right: 20px;
+  border-left: 2px solid var(--accent);
+  margin-right: 16px;
 }
 
 .message.assistant {
-  background: rgba(124, 58, 237, 0.15);
-  border-color: rgba(124, 58, 237, 0.2);
-  margin-left: 20px;
+  border-left: 2px solid var(--text-muted);
+  margin-left: 16px;
 }
 
 .message .role {
   display: block;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   margin-bottom: 4px;
-  opacity: 0.7;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .message.user .role {
-  color: #00d4ff;
+  color: var(--accent);
 }
 
 .message.assistant .role {
-  color: #a78bfa;
+  color: var(--text-secondary);
 }
 
 .message .content {
   font-size: 13px;
   line-height: 1.5;
+  color: var(--text-primary);
 }
 
 /* ==================== Controls ==================== */
@@ -345,48 +341,48 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .control-btn {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: white;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.3s ease;
+  transition: all 0.15s ease;
 }
 
 .control-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-  transform: scale(1.1);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
 .control-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.96);
 }
 
 /* Mute button states */
 .mute-btn.muted {
-  background: rgba(244, 67, 54, 0.3);
-  border-color: rgba(244, 67, 54, 0.5);
-  color: #f44336;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: var(--error);
+  color: var(--error);
 }
 
 .mute-btn.muted:hover {
-  background: rgba(244, 67, 54, 0.4);
+  background: rgba(239, 68, 68, 0.25);
 }
 
 /* Auto-mute button */
 .auto-mute-btn {
   position: relative;
   font-size: 12px;
-  font-weight: bold;
+  font-weight: 600;
 }
 
 .auto-mute-icon {
@@ -397,51 +393,45 @@ body {
   position: absolute;
   bottom: 2px;
   right: 2px;
-  width: 12px;
-  height: 12px;
-  color: #4CAF50;
+  width: 10px;
+  height: 10px;
+  color: var(--success);
 }
 
 .auto-mute-btn.enabled {
-  background: rgba(76, 175, 80, 0.2);
-  border-color: rgba(76, 175, 80, 0.4);
+  background: rgba(34, 197, 94, 0.15);
+  border-color: var(--success);
+  color: var(--success);
 }
 
 .auto-mute-btn.enabled:hover {
-  background: rgba(76, 175, 80, 0.3);
+  background: rgba(34, 197, 94, 0.25);
 }
 
 /* Clear button */
-.clear-btn {
-  opacity: 0.7;
-}
-
 .clear-btn:hover {
-  opacity: 1;
-  background: rgba(244, 67, 54, 0.2);
-  border-color: rgba(244, 67, 54, 0.3);
+  background: rgba(239, 68, 68, 0.15);
+  border-color: var(--error);
+  color: var(--error);
 }
 
 /* Wake button */
 .wake-btn {
-  padding: 12px 24px;
-  font-size: 13px;
-  font-weight: 600;
-  color: white;
-  background: linear-gradient(135deg, rgba(0, 212, 255, 0.3), rgba(124, 58, 237, 0.3));
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 25px;
+  padding: 10px 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--bg-primary);
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.15s ease;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
 }
 
 .wake-btn:hover {
-  background: linear-gradient(135deg, rgba(0, 212, 255, 0.5), rgba(124, 58, 237, 0.5));
-  transform: scale(1.05);
-  box-shadow: 0 5px 20px rgba(0, 212, 255, 0.3);
+  opacity: 0.9;
 }
 
 .wake-btn:active {
@@ -451,34 +441,18 @@ body {
 /* ==================== Scrollbar ==================== */
 
 .messages::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
 }
 
 .messages::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 3px;
+  background: transparent;
 }
 
 .messages::-webkit-scrollbar-thumb {
-  background: rgba(0, 212, 255, 0.3);
-  border-radius: 3px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
 }
 
 .messages::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 212, 255, 0.5);
-}
-
-/* ==================== Listening Animation ==================== */
-
-@keyframes listening-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 0 15px rgba(76, 175, 80, 0);
-  }
-}
-
-.status[style*="rgb(76, 175, 80)"] {
-  animation: listening-pulse 2s infinite;
+  background: var(--text-muted);
 }
