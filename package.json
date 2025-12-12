@@ -27,6 +27,7 @@
     "dotenv": "^16.3.1",
     "electron-store": "^8.1.0",
     "elevenlabs": "^0.8.1",
+    "node-gyp": "^12.1.0",
     "node-powershell": "^5.0.1",
     "node-record-lpcm16": "^1.0.1",
     "node-windows": "^1.0.0-beta.8",

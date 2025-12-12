@@ -2,7 +2,7 @@
  * JARVIS Voice Agent - Main React Component
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { AgentState, CostMetrics, Message } from '../shared/types';
 
 const { ipcRenderer } = window.require('electron');
