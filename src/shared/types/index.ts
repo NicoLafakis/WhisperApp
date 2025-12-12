@@ -146,6 +146,7 @@ export interface AppConfig {
     monthlyBudget: number;
     peakHoursStart: number;
     peakHoursEnd: number;
+    budgetThreshold: number;
   };
   voice: {
     name: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';

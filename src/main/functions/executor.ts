@@ -165,13 +165,13 @@ export class FunctionExecutor {
   private async executeFunction(functionName: string, args: Record<string, any>): Promise<any> {
     switch (functionName) {
       case 'launch_application':
-        return this.launchApplication(args);
+        return this.launchApplication(args as { name: string; args?: string[]; cwd?: string });
 
       case 'open_file':
-        return this.openFile(args);
+        return this.openFile(args as { path: string });
 
       case 'execute_command':
-        return this.executeCommand(args);
+        return this.executeCommand(args as { command: string });
 
       case 'query_system_state':
         return this.querySystemState();
@@ -180,31 +180,31 @@ export class FunctionExecutor {
         return this.queryTimeDate();
 
       case 'list_files':
-        return this.listFiles(args);
+        return this.listFiles(args as { path: string; pattern?: string });
 
       case 'create_file':
-        return this.createFile(args);
+        return this.createFile(args as { path: string; content: string });
 
       case 'read_file':
-        return this.readFile(args);
+        return this.readFile(args as { path: string });
 
       case 'delete_file':
-        return this.deleteFile(args);
+        return this.deleteFile(args as { path: string });
 
       case 'move_file':
-        return this.moveFile(args);
+        return this.moveFile(args as { source: string; destination: string });
 
       case 'search_files':
-        return this.searchFiles(args);
+        return this.searchFiles(args as { query: string; path?: string });
 
       case 'manage_window':
-        return this.manageWindow(args);
+        return this.manageWindow(args as { action: string; title: string });
 
       case 'set_volume':
-        return this.setVolume(args);
+        return this.setVolume(args as { level: number });
 
       case 'open_url':
-        return this.openUrl(args);
+        return this.openUrl(args as { url: string });
 
       default:
         throw new Error(`Unknown function: ${functionName}`);

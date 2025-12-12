@@ -38,6 +38,7 @@ export class ConfigManager {
         monthlyBudget: parseFloat(process.env.MONTHLY_BUDGET_USD || '30.00'),
         peakHoursStart: parseInt(process.env.PEAK_HOURS_START || '9'),
         peakHoursEnd: parseInt(process.env.PEAK_HOURS_END || '17'),
+        budgetThreshold: parseFloat(process.env.BUDGET_THRESHOLD || '50'),
       },
       voice: {
         name: 'alloy',

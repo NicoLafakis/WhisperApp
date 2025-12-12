@@ -24,6 +24,7 @@
     "@anthropic-ai/sdk": "^0.27.0",
     "@picovoice/porcupine-node": "^3.0.0",
     "axios": "^1.6.2",
+    "better-sqlite3": "^12.5.0",
     "dotenv": "^16.3.1",
     "electron-store": "^8.1.0",
     "elevenlabs": "^0.8.1",
@@ -33,7 +34,6 @@
     "node-windows": "^1.0.0-beta.8",
     "openai": "^4.63.0",
     "speaker": "^0.5.4",
-    "sqlite3": "^5.1.7",
     "wav": "^1.0.2",
     "ws": "^8.16.0"
   },
