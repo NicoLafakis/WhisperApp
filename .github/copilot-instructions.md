@@ -41,7 +41,7 @@ The `AdaptiveRouter` determines mode using this priority:
 5. Default to configured mode
 
 ### Function Definitions
-Functions in [src/main/functions/index.ts](src/main/functions/index.ts) follow OpenAI's tool calling schema. Add new Windows integrations there:
+Functions in [src/main/functions/index.ts](../src/main/functions/index.ts) follow OpenAI's tool calling schema. Add new Windows integrations there:
 ```typescript
 {
   name: 'function_name',
@@ -57,7 +57,7 @@ Functions in [src/main/functions/index.ts](src/main/functions/index.ts) follow O
 - **Dangerous patterns**: Regex blocklist for destructive PowerShell commands
 
 ### Type Definitions
-All shared types live in [src/shared/types/index.ts](src/shared/types/index.ts). Key types:
+All shared types live in [src/shared/types/index.ts](../src/shared/types/index.ts). Key types:
 - `AgentMode`: `'premium' | 'efficient'`
 - `AgentStatus`: `'idle' | 'listening' | 'thinking' | 'speaking' | 'executing' | 'error'`
 - `RoutingDecision`: Contains mode, reason, estimated cost/latency
@@ -74,7 +74,7 @@ npm run type-check   # TypeScript validation without emit
 
 ## Testing Conventions
 
-Tests live in `tests/unit/` with `.test.ts` suffix. Pattern from [AdaptiveRouter.test.ts](tests/unit/AdaptiveRouter.test.ts):
+Tests live in `tests/unit/` with `.test.ts` suffix. Pattern from [AdaptiveRouter.test.ts](../tests/unit/AdaptiveRouter.test.ts):
 - Use `jest.spyOn(Date.prototype, 'getHours')` to mock time-based routing
 - Call `jest.restoreAllMocks()` in both `beforeEach` and `afterEach`
 - Test routing decisions by manipulating `CostTracker` state
