@@ -411,6 +411,25 @@ export class FallbackChain extends EventEmitter {
   }
 
   /**
+   * Synthesize and play text directly (for greetings and follow-ups)
+   */
+  async synthesizeAndPlay(text: string): Promise<Buffer> {
+    try {
+      this.emit('stage', 'synthesizing');
+      const audioBuffer = await this.withRetry(
+        () => this.synthesizeSpeech(text),
+        'elevenlabs-tts'
+      );
+      logger.info('Speech synthesized for direct playback', { text, bytes: audioBuffer.length });
+      this.emit('audio', audioBuffer);
+      return audioBuffer;
+    } catch (error) {
+      logger.error('Failed to synthesize speech', { error });
+      throw error;
+    }
+  }
+
+  /**
    * Clear conversation history
    */
   clearHistory() {

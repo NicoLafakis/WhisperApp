@@ -1,11 +1,11 @@
 /**
- * JARVIS Voice Agent - Main Engine
- * Orchestrates all components: wake word, audio, routing, APIs, and functions
+ * JARVIS Voice Agent - Main Engine (Autonomous Mode)
+ * Orchestrates all components: audio, routing, APIs, and functions
+ * Always listening - no wake word required
  */
 
 import { EventEmitter } from 'events';
 import { AudioCapture } from './engine/AudioCapture';
-import { WakeWordDetector } from './engine/WakeWordDetector';
 import { CostTracker } from './engine/CostTracker';
 import { AdaptiveRouter } from './engine/AdaptiveRouter';
 import { RealtimeClient } from './services/RealtimeClient';
@@ -15,12 +15,25 @@ import { JARVIS_FUNCTIONS } from './functions';
 import { AgentState, AgentStatus, AgentMode, AudioBuffer, FunctionCall } from '../shared/types';
 import { logger } from '../shared/utils/logger';
 import { configManager } from '../shared/utils/config';
-import { Writable } from 'stream';
 import Speaker from 'speaker';
+
+// Greetings JARVIS can use on startup
+const STARTUP_GREETINGS = [
+  "Good to see you. What can I help you with?",
+  "Hello. I'm here and ready to assist.",
+  "At your service. What would you like me to do?",
+  "I'm online and listening. How can I help?",
+];
+
+// Follow-up prompts when user doesn't respond
+const FOLLOW_UP_PROMPTS = [
+  "You there?",
+  "Still with me?",
+  "Anything I can help with?",
+];
 
 export class JarvisEngine extends EventEmitter {
   private audioCapture: AudioCapture;
-  private wakeWordDetector: WakeWordDetector;
   private costTracker: CostTracker;
   private adaptiveRouter: AdaptiveRouter;
   private realtimeClient: RealtimeClient | null = null;
@@ -33,14 +46,20 @@ export class JarvisEngine extends EventEmitter {
   private currentMode: AgentMode = 'premium';
   private audioBuffer: Buffer[] = [];
 
+  // Silence tracking for follow-up prompts
+  private silenceTimer: NodeJS.Timeout | null = null;
+  private silenceTimeoutMs: number = 10000; // 10 seconds
+  private hasGreeted: boolean = false;
+  private followUpCount: number = 0;
+  private maxFollowUps: number = 2; // Max follow-ups before going quiet
+
   constructor() {
     super();
 
     const config = configManager.getConfig();
 
-    // Initialize components
+    // Initialize components (no wake word detector needed)
     this.audioCapture = new AudioCapture(config.audio);
-    this.wakeWordDetector = new WakeWordDetector(config.wakeWord.keyword, config.wakeWord.sensitivity);
     this.costTracker = new CostTracker(config.routing.dailyBudget, config.routing.monthlyBudget);
     this.adaptiveRouter = new AdaptiveRouter(this.costTracker, config.routing);
     this.functionExecutor = new FunctionExecutor(config.security.blocked, config.security.requireConfirmation);
@@ -67,11 +86,6 @@ export class JarvisEngine extends EventEmitter {
       logger.error('Audio capture error', { error: error.message });
       this.updateStatus('error');
     });
-
-    // Wake word events
-    this.wakeWordDetector.on('wakeword', () => {
-      this.handleWakeWord();
-    });
   }
 
   async start() {
@@ -81,27 +95,97 @@ export class JarvisEngine extends EventEmitter {
     }
 
     try {
-      logger.info('Starting JARVIS engine...');
-
-      // Start audio capture
-      this.audioCapture.start();
-
-      // Start wake word detector
-      await this.wakeWordDetector.start();
+      logger.info('Starting JARVIS engine (autonomous mode)...');
 
       // Initialize API clients based on routing decision
       await this.initializeClients();
 
+      // Start audio capture
+      this.audioCapture.start();
+
       this.isRunning = true;
-      this.updateStatus('idle');
+
+      // Go directly to listening mode - always ready
+      this.updateStatus('listening');
 
       logger.info('JARVIS engine started successfully');
       this.emit('started');
+
+      // Greet the user after a short delay to let everything initialize
+      setTimeout(() => {
+        this.greetUser();
+      }, 1000);
 
     } catch (error) {
       logger.error('Failed to start JARVIS', { error });
       throw error;
     }
+  }
+
+  private async greetUser() {
+    if (this.hasGreeted) return;
+
+    const greeting = STARTUP_GREETINGS[Math.floor(Math.random() * STARTUP_GREETINGS.length)];
+    logger.info('Greeting user', { greeting });
+
+    this.hasGreeted = true;
+    this.updateStatus('speaking');
+
+    // Send greeting through the API to get voice synthesis
+    if (this.currentMode === 'premium' && this.realtimeClient) {
+      this.realtimeClient.sendText(greeting);
+    } else if (this.fallbackChain) {
+      // For fallback, synthesize directly
+      await this.fallbackChain.synthesizeAndPlay(greeting);
+      this.finishInteraction();
+    }
+
+    // Emit transcript for UI
+    this.emit('transcript', { role: 'assistant', text: greeting });
+  }
+
+  private startSilenceTimer() {
+    this.clearSilenceTimer();
+
+    // Only start timer if we haven't hit max follow-ups
+    if (this.followUpCount >= this.maxFollowUps) {
+      logger.info('Max follow-ups reached, staying quiet');
+      return;
+    }
+
+    this.silenceTimer = setTimeout(() => {
+      this.handleSilenceTimeout();
+    }, this.silenceTimeoutMs);
+  }
+
+  private clearSilenceTimer() {
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+  }
+
+  private async handleSilenceTimeout() {
+    // User hasn't responded, send a follow-up
+    const prompt = FOLLOW_UP_PROMPTS[Math.floor(Math.random() * FOLLOW_UP_PROMPTS.length)];
+    logger.info('Silence timeout, sending follow-up', { prompt, followUpCount: this.followUpCount });
+
+    this.followUpCount++;
+    this.updateStatus('speaking');
+
+    if (this.currentMode === 'premium' && this.realtimeClient) {
+      this.realtimeClient.sendText(prompt);
+    } else if (this.fallbackChain) {
+      await this.fallbackChain.synthesizeAndPlay(prompt);
+      this.finishInteraction();
+    }
+
+    this.emit('transcript', { role: 'assistant', text: prompt });
+  }
+
+  // Reset follow-up count when user actually speaks
+  private resetFollowUpCount() {
+    this.followUpCount = 0;
   }
 
   async stop() {
@@ -112,11 +196,11 @@ export class JarvisEngine extends EventEmitter {
     try {
       logger.info('Stopping JARVIS engine...');
 
+      // Clear silence timer
+      this.clearSilenceTimer();
+
       // Stop audio capture
       this.audioCapture.stop();
-
-      // Stop wake word detector
-      this.wakeWordDetector.stop();
 
       // Disconnect clients
       if (this.realtimeClient) {
@@ -130,6 +214,8 @@ export class JarvisEngine extends EventEmitter {
       }
 
       this.isRunning = false;
+      this.hasGreeted = false;
+      this.followUpCount = 0;
       this.updateStatus('idle');
 
       logger.info('JARVIS engine stopped');
@@ -190,6 +276,9 @@ export class JarvisEngine extends EventEmitter {
     });
 
     this.realtimeClient.on('speech.started', () => {
+      // User started speaking - clear silence timer and reset follow-up count
+      this.clearSilenceTimer();
+      this.resetFollowUpCount();
       this.updateStatus('listening');
     });
 
@@ -206,6 +295,9 @@ export class JarvisEngine extends EventEmitter {
 
       // Finish the interaction (handles audio cleanup and events)
       this.finishInteraction();
+
+      // Start silence timer for follow-up prompts
+      this.startSilenceTimer();
     });
   }
 
@@ -243,54 +335,20 @@ export class JarvisEngine extends EventEmitter {
   }
 
   private handleAudioInput(audioBuffer: AudioBuffer) {
-    // Feed to wake word detector
-    if (this.state.status === 'idle') {
-      this.wakeWordDetector.processAudio(audioBuffer.data);
+    // In autonomous mode, always send audio to the API (it handles VAD)
+    // Only skip if we're currently speaking (to avoid feedback loop)
+    if (this.state.status === 'speaking' || this.state.status === 'error') {
+      return;
     }
 
-    // If actively listening, buffer the audio
-    if (this.state.status === 'listening') {
-      this.audioBuffer.push(audioBuffer.data);
+    this.audioBuffer.push(audioBuffer.data);
 
-      // Send to active client
-      if (this.currentMode === 'premium' && this.realtimeClient) {
-        this.realtimeClient.sendAudio(audioBuffer.data);
-      }
-    }
-  }
-
-  private async handleWakeWord() {
-    logger.info('Wake word detected!');
-    this.updateStatus('listening');
-    this.audioBuffer = [];
-
-    // Emit wake word event for auto-mute functionality
-    this.emit('wakeword');
-
-    // Re-evaluate routing decision
-    const routingDecision = this.adaptiveRouter.route();
-
-    // Switch modes if needed
-    if (routingDecision.mode !== this.currentMode) {
-      logger.info('Switching mode', { from: this.currentMode, to: routingDecision.mode });
-      this.currentMode = routingDecision.mode;
-      await this.initializeClients();
-    }
-
-    // Start listening
+    // Send to active client
     if (this.currentMode === 'premium' && this.realtimeClient) {
-      // Realtime API handles VAD automatically
-      logger.info('Listening via Realtime API...');
-    } else if (this.currentMode === 'efficient') {
-      // For fallback, we need to manually detect end of speech
-      logger.info('Listening via fallback chain...');
-
-      // Simple timeout-based approach (in production, use proper VAD)
-      setTimeout(() => {
-        this.processBufferedAudio();
-      }, 3000); // 3 seconds of silence
+      this.realtimeClient.sendAudio(audioBuffer.data);
     }
   }
+
 
   private async processBufferedAudio() {
     if (this.audioBuffer.length === 0) {
@@ -406,8 +464,12 @@ export class JarvisEngine extends EventEmitter {
     logger.info('Forced mode set', { mode });
   }
 
-  // Trigger wake word manually (for testing)
+  // Reset conversation state and greet again (can be triggered manually)
   triggerWakeWord() {
-    this.wakeWordDetector.simulateWakeWord();
+    logger.info('Manual trigger - resetting conversation');
+    this.followUpCount = 0;
+    this.hasGreeted = false;
+    this.clearSilenceTimer();
+    this.greetUser();
   }
 }

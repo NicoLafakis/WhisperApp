@@ -4,7 +4,9 @@
       "Bash(npm audit:*)",
       "Bash(npx tsc:*)",
       "Bash(npm update:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npm run build:main:*)",
+      "Bash(npm run build:renderer:*)"
     ]
   }
 }
