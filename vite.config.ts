@@ -1,3 +1,8 @@
+/**
+ * JARVIS Voice Agent - Vite Configuration
+ * Build configuration for the React renderer process
+ */
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';

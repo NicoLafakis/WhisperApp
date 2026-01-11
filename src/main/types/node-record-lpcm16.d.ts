@@ -1,3 +1,8 @@
+/**
+ * JARVIS Voice Agent - Type Definitions for node-record-lpcm16
+ * TypeScript declaration for the node-record-lpcm16 audio recording library
+ */
+
 declare module 'node-record-lpcm16' {
   import { Readable } from 'stream';
 
