@@ -6,7 +6,12 @@
       "Bash(npm update:*)",
       "Bash(npm install:*)",
       "Bash(npm run build:main:*)",
-      "Bash(npm run build:renderer:*)"
+      "Bash(npm run build:renderer:*)",
+      "Bash(dir \"C:\\\\programming\\\\WhisperApp-1\" /b)",
+      "Bash(findstr:*)",
+      "Bash(node scripts/generate-icon.js:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run type-check:*)"
     ]
   }
 }

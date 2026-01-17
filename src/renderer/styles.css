@@ -4,6 +4,7 @@
   box-sizing: border-box;
 }
 
+/* Dark theme (default) */
 :root {
   --bg-primary: #1c1c1e;
   --bg-secondary: #2c2c2e;
@@ -23,6 +24,28 @@
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 20px;
+  color-scheme: dark;
+}
+
+/* Light theme */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-primary: #f5f5f7;
+    --bg-secondary: #e5e5ea;
+    --bg-tertiary: #d1d1d6;
+    --bg-elevated: rgba(255, 255, 255, 0.9);
+    --text-primary: #1c1c1e;
+    --text-secondary: #636366;
+    --text-muted: #8e8e93;
+    --accent: #007aff;
+    --accent-muted: rgba(0, 122, 255, 0.12);
+    --border: rgba(0, 0, 0, 0.08);
+    --error: #ff3b30;
+    --success: #34c759;
+    --warning: #ffcc00;
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+    color-scheme: light;
+  }
 }
 
 body {
@@ -69,7 +92,9 @@ body {
 }
 
 .status {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 16px;
   border-radius: 100px;
   font-size: 11px;
@@ -80,6 +105,10 @@ body {
   border: none;
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
+}
+
+.status-icon {
+  font-size: 12px;
 }
 
 /* ==================== Audio Visualizer ==================== */
@@ -581,6 +610,46 @@ body {
 
 .settings-field input::placeholder {
   color: var(--text-muted);
+}
+
+/* Input with toggle button (for API key visibility) */
+.input-with-toggle {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-toggle input {
+  padding-right: 44px;
+}
+
+.toggle-visibility {
+  position: absolute;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: background 0.2s ease;
+}
+
+.toggle-visibility:hover {
+  background: var(--bg-tertiary);
+}
+
+.hint-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.hint-link:hover {
+  text-decoration: underline;
 }
 
 .settings-field input[type="range"] {

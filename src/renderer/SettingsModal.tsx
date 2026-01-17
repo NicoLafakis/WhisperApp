@@ -3,8 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
-
-const { ipcRenderer } = window.require('electron');
+import './electron.d.ts';
 
 export interface UserSettings {
   openaiApiKey: string;
@@ -38,10 +37,11 @@ export default function SettingsModal({ isOpen, onClose, isFirstRun }: SettingsM
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showApiKey, setShowApiKey] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      ipcRenderer.invoke('settings:get').then((savedSettings: Partial<UserSettings>) => {
+      window.electronAPI.getSettings().then((savedSettings) => {
         if (savedSettings) {
           setSettings(prev => ({ ...prev, ...savedSettings }));
         }
@@ -61,14 +61,22 @@ export default function SettingsModal({ isOpen, onClose, isFirstRun }: SettingsM
       return;
     }
 
+    // Basic API key format validation
+    if (!settings.openaiApiKey.startsWith('sk-')) {
+      setError('OpenAI API key should start with "sk-"');
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
     try {
-      await ipcRenderer.invoke('settings:save', settings);
+      // Cast to Record<string, unknown> for IPC compatibility
+      await window.electronAPI.saveSettings(settings as unknown as Record<string, unknown>);
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to save settings');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to save settings';
+      setError(errorMessage);
     } finally {
       setSaving(false);
     }
@@ -77,101 +85,118 @@ export default function SettingsModal({ isOpen, onClose, isFirstRun }: SettingsM
   if (!isOpen) return null;
 
   return (
-    <div className="settings-overlay">
+    <div
+      className="settings-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+    >
       <div className="settings-modal">
         <div className="settings-header">
-          <h2>{isFirstRun ? 'Welcome to JARVIS' : 'Settings'}</h2>
+          <h2 id="settings-title">{isFirstRun ? 'Welcome to JARVIS' : 'Settings'}</h2>
           {isFirstRun && (
             <p className="settings-subtitle">Configure your voice assistant to get started</p>
           )}
         </div>
 
         <div className="settings-content">
-          {error && <div className="settings-error">{error}</div>}
+          {error && (
+            <div className="settings-error" role="alert">
+              {error}
+            </div>
+          )}
 
-          <div className="settings-section">
-            <h3>API Keys</h3>
+          <section className="settings-section" aria-labelledby="api-keys-heading">
+            <h3 id="api-keys-heading">API Keys</h3>
 
             <div className="settings-field">
-              <label>OpenAI API Key *</label>
-              <input
-                type="password"
-                value={settings.openaiApiKey}
-                onChange={(e) => handleChange('openaiApiKey', e.target.value)}
-                placeholder="sk-..."
-              />
-              <span className="field-hint">Required for voice recognition and responses</span>
+              <label htmlFor="openai-key">OpenAI API Key *</label>
+              <div className="input-with-toggle">
+                <input
+                  id="openai-key"
+                  type={showApiKey ? 'text' : 'password'}
+                  value={settings.openaiApiKey}
+                  onChange={(e) => handleChange('openaiApiKey', e.target.value)}
+                  placeholder="sk-..."
+                  autoComplete="off"
+                  aria-required="true"
+                  aria-describedby="openai-key-hint"
+                />
+                <button
+                  type="button"
+                  className="toggle-visibility"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
+                >
+                  {showApiKey ? '🙈' : '👁️'}
+                </button>
+              </div>
+              <span id="openai-key-hint" className="field-hint">
+                Required for voice recognition and responses.{' '}
+                <a
+                  href="https://platform.openai.com/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hint-link"
+                >
+                  Get your API key
+                </a>
+              </span>
             </div>
 
             <div className="settings-field">
-              <label>ElevenLabs API Key</label>
+              <label htmlFor="elevenlabs-key">ElevenLabs API Key</label>
               <input
+                id="elevenlabs-key"
                 type="password"
                 value={settings.elevenLabsApiKey}
                 onChange={(e) => handleChange('elevenLabsApiKey', e.target.value)}
                 placeholder="Optional - for premium voice"
+                autoComplete="off"
+                aria-describedby="elevenlabs-key-hint"
               />
-              <span className="field-hint">Optional - enables higher quality voice</span>
+              <span id="elevenlabs-key-hint" className="field-hint">
+                Optional - enables higher quality voice synthesis
+              </span>
             </div>
-          </div>
+          </section>
 
-          <div className="settings-section">
-            <h3>Wake Word</h3>
-
-            <div className="settings-field">
-              <label>Keyword</label>
-              <input
-                type="text"
-                value={settings.wakeWord}
-                onChange={(e) => handleChange('wakeWord', e.target.value)}
-                placeholder="jarvis"
-              />
-            </div>
-
-            <div className="settings-field">
-              <label>Sensitivity: {settings.sensitivity.toFixed(1)}</label>
-              <input
-                type="range"
-                min="0.1"
-                max="1.0"
-                step="0.1"
-                value={settings.sensitivity}
-                onChange={(e) => handleChange('sensitivity', parseFloat(e.target.value))}
-              />
-              <span className="field-hint">Higher = more sensitive, may cause false triggers</span>
-            </div>
-          </div>
-
-          <div className="settings-section">
-            <h3>Budget Limits</h3>
+          <section className="settings-section" aria-labelledby="budget-heading">
+            <h3 id="budget-heading">Budget Limits</h3>
 
             <div className="settings-row">
               <div className="settings-field">
-                <label>Daily Budget ($)</label>
+                <label htmlFor="daily-budget">Daily Budget ($)</label>
                 <input
+                  id="daily-budget"
                   type="number"
                   min="0.10"
                   step="0.10"
                   value={settings.dailyBudget}
-                  onChange={(e) => handleChange('dailyBudget', parseFloat(e.target.value))}
+                  onChange={(e) => handleChange('dailyBudget', parseFloat(e.target.value) || 0.10)}
+                  aria-describedby="daily-budget-hint"
                 />
               </div>
 
               <div className="settings-field">
-                <label>Monthly Budget ($)</label>
+                <label htmlFor="monthly-budget">Monthly Budget ($)</label>
                 <input
+                  id="monthly-budget"
                   type="number"
                   min="1"
                   step="1"
                   value={settings.monthlyBudget}
-                  onChange={(e) => handleChange('monthlyBudget', parseFloat(e.target.value))}
+                  onChange={(e) => handleChange('monthlyBudget', parseFloat(e.target.value) || 1)}
                 />
               </div>
             </div>
-          </div>
+            <span id="daily-budget-hint" className="field-hint">
+              JARVIS will switch to efficient mode when approaching budget limits
+            </span>
+          </section>
 
-          <div className="settings-section">
-            <h3>Startup</h3>
+          <section className="settings-section" aria-labelledby="startup-heading">
+            <h3 id="startup-heading">Startup</h3>
 
             <div className="settings-checkbox">
               <label>
@@ -194,19 +219,25 @@ export default function SettingsModal({ isOpen, onClose, isFirstRun }: SettingsM
                 Skip this screen on startup
               </label>
             </div>
-          </div>
+          </section>
         </div>
 
         <div className="settings-footer">
           {!isFirstRun && (
-            <button className="settings-btn secondary" onClick={onClose}>
+            <button
+              type="button"
+              className="settings-btn secondary"
+              onClick={onClose}
+            >
               Cancel
             </button>
           )}
           <button
+            type="button"
             className="settings-btn primary"
             onClick={handleSave}
             disabled={saving}
+            aria-busy={saving}
           >
             {saving ? 'Saving...' : (isFirstRun ? 'Get Started' : 'Save')}
           </button>

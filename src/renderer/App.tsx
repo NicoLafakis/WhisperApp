@@ -5,15 +5,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AgentState, CostMetrics, Message } from '../shared/types';
 import SettingsModal from './SettingsModal';
-
-const { ipcRenderer } = window.require('electron');
+import './electron.d.ts';
 
 // Audio visualization component
 function AudioVisualizer({ isActive, intensity }: { isActive: boolean; intensity: number }) {
   const bars = 5;
 
   return (
-    <div className={`audio-visualizer ${isActive ? 'active' : ''}`}>
+    <div
+      className={`audio-visualizer ${isActive ? 'active' : ''}`}
+      role="img"
+      aria-label={isActive ? 'Audio visualizer showing active audio' : 'Audio visualizer inactive'}
+    >
       {Array.from({ length: bars }).map((_, i) => (
         <div
           key={i}
@@ -31,7 +34,11 @@ function AudioVisualizer({ isActive, intensity }: { isActive: boolean; intensity
 // Pulsing orb component for speaking state
 function SpeakingOrb({ isActive }: { isActive: boolean }) {
   return (
-    <div className={`speaking-orb ${isActive ? 'active' : ''}`}>
+    <div
+      className={`speaking-orb ${isActive ? 'active' : ''}`}
+      role="img"
+      aria-label={isActive ? 'JARVIS is speaking' : 'JARVIS voice indicator'}
+    >
       <div className="orb-core" />
       <div className="orb-ring ring-1" />
       <div className="orb-ring ring-2" />
@@ -57,7 +64,7 @@ export default function App() {
 
   // Check for first run on mount
   useEffect(() => {
-    ipcRenderer.invoke('settings:check-first-run').then((result: { isFirstRun: boolean; showSettings: boolean }) => {
+    window.electronAPI.checkFirstRun().then((result) => {
       setIsFirstRun(result.isFirstRun);
       if (result.showSettings) {
         setShowSettings(true);
@@ -69,12 +76,12 @@ export default function App() {
     setShowSettings(false);
     setIsFirstRun(false);
     // Notify main process that setup is complete
-    ipcRenderer.invoke('agent:start');
+    window.electronAPI.startAgent();
   }, []);
 
   useEffect(() => {
-    // Listen for agent status changes
-    ipcRenderer.on('agent:status-changed', (_event: any, state: AgentState) => {
+    // Set up event listeners using the secure API
+    const cleanupStatus = window.electronAPI.onStatusChanged((state: AgentState) => {
       setAgentState(state);
 
       // Track speaking state for visualization
@@ -85,51 +92,48 @@ export default function App() {
       }
     });
 
-    // Listen for messages
-    ipcRenderer.on('agent:message', (_event: any, message: any) => {
+    const cleanupMessage = window.electronAPI.onMessage((message: { role: string; text: string }) => {
       setMessages(prev => [
         ...prev,
         {
           id: Date.now().toString(),
-          role: message.role,
+          role: message.role as 'user' | 'assistant',
           content: message.text,
           timestamp: Date.now(),
         },
       ]);
     });
 
-    // Listen for cost updates
-    ipcRenderer.on('cost:updated', (_event: any, costMetrics: CostMetrics) => {
+    const cleanupCost = window.electronAPI.onCostUpdated((costMetrics: CostMetrics) => {
       setMetrics(costMetrics);
     });
 
-    // Listen for audio playback events (for visualization)
-    ipcRenderer.on('audio:playing', (_event: any, data: { intensity: number }) => {
+    const cleanupAudioPlaying = window.electronAPI.onAudioPlaying((data: { intensity: number }) => {
       setIsAudioPlaying(true);
       setAudioIntensity(data.intensity || 0.5);
     });
 
-    ipcRenderer.on('audio:stopped', () => {
+    const cleanupAudioStopped = window.electronAPI.onAudioStopped(() => {
       setIsAudioPlaying(false);
       setAudioIntensity(0);
     });
 
     // Get initial state
-    ipcRenderer.invoke('agent:get-state').then((state: AgentState) => {
+    window.electronAPI.getAgentState().then((state) => {
       if (state) setAgentState(state);
     });
 
     return () => {
-      ipcRenderer.removeAllListeners('agent:status-changed');
-      ipcRenderer.removeAllListeners('agent:message');
-      ipcRenderer.removeAllListeners('cost:updated');
-      ipcRenderer.removeAllListeners('audio:playing');
-      ipcRenderer.removeAllListeners('audio:stopped');
+      cleanupStatus();
+      cleanupMessage();
+      cleanupCost();
+      cleanupAudioPlaying();
+      cleanupAudioStopped();
     };
   }, []);
 
   const triggerReset = () => {
-    ipcRenderer.invoke('agent:trigger-wakeword');
+    window.electronAPI.triggerWakeWord();
   };
 
   const clearMessages = useCallback(() => {
@@ -158,10 +162,21 @@ export default function App() {
     }
   };
 
+  const getStatusIcon = () => {
+    switch (agentState?.status) {
+      case 'listening': return '🎤';
+      case 'thinking': return '🤔';
+      case 'speaking': return '🔊';
+      case 'executing': return '⚙️';
+      case 'error': return '⚠️';
+      default: return '💤';
+    }
+  };
+
   const isSpeaking = agentState?.status === 'speaking' || isAudioPlaying;
 
   return (
-    <div className="app">
+    <div className="app" role="application" aria-label="JARVIS Voice Assistant">
       <SettingsModal
         isOpen={showSettings}
         onClose={handleSettingsClose}
@@ -172,24 +187,30 @@ export default function App() {
         type="button"
         className="settings-trigger"
         onClick={() => setShowSettings(true)}
-        title="Settings"
+        aria-label="Open settings"
       >
-        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true">
           <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
         </svg>
       </button>
 
-      <div className="header">
+      <header className="header">
         <h1>JARVIS</h1>
         <div className="status-container">
-          <div className="status" style={{ backgroundColor: getStatusColor() }}>
+          <div
+            className="status"
+            style={{ backgroundColor: getStatusColor() }}
+            role="status"
+            aria-live="polite"
+          >
+            <span className="status-icon" aria-hidden="true">{getStatusIcon()}</span>
             {getStatusText()}
           </div>
           {isSpeaking && (
             <AudioVisualizer isActive={true} intensity={audioIntensity || 0.7} />
           )}
         </div>
-      </div>
+      </header>
 
       {/* Speaking visualization orb */}
       <div className="visualization-section">
@@ -197,47 +218,66 @@ export default function App() {
       </div>
 
       <div className="mode-indicator">
-        <span className={`mode ${agentState?.mode === 'premium' ? 'premium' : 'efficient'}`}>
-          {agentState?.mode === 'premium' ? 'Premium Mode' : 'Efficient Mode'}
+        <span
+          className={`mode ${agentState?.mode === 'premium' ? 'premium' : 'efficient'}`}
+          role="status"
+          aria-label={`Current mode: ${agentState?.mode === 'premium' ? 'Premium' : 'Efficient'}`}
+        >
+          {agentState?.mode === 'premium' ? '⚡ Premium Mode' : '💰 Efficient Mode'}
         </span>
       </div>
 
       {metrics && (
-        <div className="metrics">
+        <section className="metrics" aria-label="Cost metrics">
           <div className="metric">
             <span className="label">Today</span>
-            <span className="value">${metrics.todayCost.toFixed(3)}</span>
+            <span className="value" aria-label={`Today's cost: $${metrics.todayCost.toFixed(3)}`}>
+              ${metrics.todayCost.toFixed(3)}
+            </span>
           </div>
           <div className="metric">
             <span className="label">Month</span>
-            <span className="value">${metrics.monthCost.toFixed(2)}</span>
+            <span className="value" aria-label={`This month's cost: $${metrics.monthCost.toFixed(2)}`}>
+              ${metrics.monthCost.toFixed(2)}
+            </span>
           </div>
           <div className="metric">
             <span className="label">Count</span>
-            <span className="value">{metrics.interactionCount}</span>
+            <span className="value" aria-label={`Interaction count: ${metrics.interactionCount}`}>
+              {metrics.interactionCount}
+            </span>
           </div>
-        </div>
+        </section>
       )}
 
-      <div className="messages">
+      <section className="messages" aria-label="Conversation history" role="log">
         {messages.length === 0 ? (
           <div className="empty-messages">
             <span>JARVIS is listening...</span>
           </div>
         ) : (
           messages.slice(-10).map((msg) => (
-            <div key={msg.id} className={`message ${msg.role}`}>
+            <article
+              key={msg.id}
+              className={`message ${msg.role}`}
+              aria-label={`${msg.role === 'user' ? 'You' : 'JARVIS'} said`}
+            >
               <span className="role">{msg.role === 'user' ? 'You' : 'JARVIS'}:</span>
               <span className="content">{msg.content}</span>
-            </div>
+            </article>
           ))
         )}
         <div ref={messagesEndRef} />
-      </div>
+      </section>
 
-      <div className="controls">
+      <nav className="controls" aria-label="Controls">
         <div className="control-row">
-          <button type="button" className="wake-btn" onClick={triggerReset}>
+          <button
+            type="button"
+            className="wake-btn"
+            onClick={triggerReset}
+            aria-label="Reset conversation and start fresh"
+          >
             Reset Conversation
           </button>
 
@@ -245,14 +285,14 @@ export default function App() {
             type="button"
             className="control-btn clear-btn"
             onClick={clearMessages}
-            title="Clear messages"
+            aria-label="Clear all messages"
           >
-            <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20" aria-hidden="true">
               <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
             </svg>
           </button>
         </div>
-      </div>
+      </nav>
     </div>
   );
 }
