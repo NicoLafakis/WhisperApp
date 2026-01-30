@@ -1,3 +1,8 @@
+/**
+ * JARVIS Voice Agent - Jest Configuration
+ * Configuration for unit testing with ts-jest
+ */
+
 /** @type {import('ts-jest').JestConfigWithTsJest} */
 module.exports = {
   preset: 'ts-jest',
