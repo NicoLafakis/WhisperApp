@@ -1,10 +1,11 @@
 ﻿import logging
+import math
 import sys
 from pathlib import Path
 from tempfile import gettempdir
 
-from PyQt5.QtCore import QObject, QThread, QTimer, Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QIcon, QPainter, QPixmap
+from PyQt5.QtCore import QObject, QRectF, QThread, QTimer, Qt, pyqtSignal
+from PyQt5.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAction,
     QApplication,
@@ -12,6 +13,7 @@ from PyQt5.QtWidgets import (
     QMenu,
     QMessageBox,
     QSystemTrayIcon,
+    QWidget,
 )
 
 from whisperapp.audio_recorder import AudioRecorder
@@ -64,6 +66,113 @@ class TranscriptionThread(QThread):
         self.finished_text.emit(text)
 
 
+class RecordingIndicator(QWidget):
+    def __init__(self) -> None:
+        super().__init__(
+            None,
+            Qt.Tool
+            | Qt.FramelessWindowHint
+            | Qt.WindowStaysOnTopHint
+            | Qt.WindowDoesNotAcceptFocus,
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setFixedSize(180, 44)
+        self._phase = 0.0
+        self._timer = QTimer(self)
+        self._timer.setInterval(33)
+        self._timer.timeout.connect(self._tick)
+
+    def show_indicator(self) -> None:
+        self._phase = 0.0
+        self._position_center_screen()
+        self._timer.start()
+        self.show()
+        self.raise_()
+
+    def hide_indicator(self) -> None:
+        self._timer.stop()
+        self.hide()
+
+    def _position_center_screen(self) -> None:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        rect = screen.availableGeometry()
+        self.move(
+            rect.left() + (rect.width() - self.width()) // 2,
+            rect.top() + (rect.height() - self.height()) // 2,
+        )
+
+    def _tick(self) -> None:
+        self._phase = (self._phase + 0.22) % (math.pi * 2)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        bg = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
+        frame = QPainterPath()
+        frame.moveTo(bg.left() + 10, bg.top())
+        frame.lineTo(bg.right() - 10, bg.top())
+        frame.lineTo(bg.right(), bg.top() + 10)
+        frame.lineTo(bg.right(), bg.bottom() - 10)
+        frame.lineTo(bg.right() - 10, bg.bottom())
+        frame.lineTo(bg.left() + 10, bg.bottom())
+        frame.lineTo(bg.left(), bg.bottom() - 10)
+        frame.lineTo(bg.left(), bg.top() + 10)
+        frame.closeSubpath()
+
+        painter.setBrush(QColor(5, 8, 12, 232))
+        painter.setPen(Qt.NoPen)
+        painter.drawPath(frame)
+
+        glow = QColor(255, 47, 47, 90)
+        painter.setPen(QPen(glow, 4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(frame)
+        painter.setPen(QPen(QColor(255, 76, 58, 230), 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(frame)
+
+        painter.setPen(QPen(QColor(255, 65, 50, 38), 1))
+        for y in range(9, self.height(), 7):
+            painter.drawLine(14, y, self.width() - 14, y)
+
+        painter.setPen(Qt.NoPen)
+        pulse = 8 + math.sin(self._phase) * 2
+        painter.setBrush(QColor(255, 34, 34, 54))
+        painter.drawEllipse(QRectF(21 - pulse / 2, 22 - pulse / 2, pulse, pulse))
+        painter.setBrush(QColor(255, 55, 45))
+        painter.drawEllipse(QRectF(18, 19, 6, 6))
+
+        width = 118
+        left = 42
+        center_y = 22
+        path = QPainterPath()
+        for x in range(width + 1):
+            y = center_y + (
+                math.sin((x * 0.18) + self._phase * 2.2) * 7
+                + math.sin((x * 0.43) - self._phase * 1.4) * 2.5
+            )
+            if x == 0:
+                path.moveTo(left + x, y)
+            else:
+                path.lineTo(left + x, y)
+
+        painter.setPen(QPen(QColor(255, 28, 28, 52), 10, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(path)
+        painter.setPen(QPen(QColor(255, 45, 36, 130), 6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(path)
+        painter.setPen(QPen(QColor(255, 92, 62, 245), 2.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(path)
+
+        sweep_x = left + ((math.sin(self._phase * 1.6) + 1) / 2) * width
+        painter.setPen(QPen(QColor(255, 180, 105, 190), 1.2))
+        painter.drawLine(left - 5, center_y, left + width + 5, center_y)
+        painter.setPen(QPen(QColor(255, 210, 135, 165), 2))
+        painter.drawLine(int(sweep_x), 10, int(sweep_x), 34)
+
+
 class WhisperTrayApp(QObject):
     def __init__(self, app: QApplication):
         super().__init__()
@@ -84,6 +193,7 @@ class WhisperTrayApp(QObject):
         self._is_recording = False
         self._is_transcribing = False
         self._worker_thread = None
+        self.recording_indicator = RecordingIndicator()
 
         self.tray = QSystemTrayIcon(self._create_icon(), self.app)
         self.menu = QMenu()
@@ -224,6 +334,7 @@ class WhisperTrayApp(QObject):
         try:
             self.audio_recorder.start_recording()
             self._is_recording = True
+            self.recording_indicator.show_indicator()
             self.set_status("Recording...")
             self.notify(
                 "Recording Started",
@@ -231,6 +342,7 @@ class WhisperTrayApp(QObject):
             )
         except Exception as exc:
             logging.exception("Recording start failed")
+            self.recording_indicator.hide_indicator()
             self.set_status("Ready")
             self.notify("Recording Error", str(exc))
 
@@ -239,6 +351,7 @@ class WhisperTrayApp(QObject):
             return
 
         self._is_recording = False
+        self.recording_indicator.hide_indicator()
         self.set_status("Transcribing...")
         self._is_transcribing = True
 
@@ -280,6 +393,10 @@ class WhisperTrayApp(QObject):
             self.notify("Transcription Complete", text)
 
     def cleanup(self) -> None:
+        try:
+            self.recording_indicator.hide_indicator()
+        except Exception:
+            logging.exception("Recording indicator shutdown failed")
         try:
             self.hotkey_listener.stop()
         except Exception:
