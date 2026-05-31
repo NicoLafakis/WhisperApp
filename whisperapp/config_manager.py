@@ -19,7 +19,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
 
 class ConfigManager:
     def __init__(self) -> None:
-        self.config_dir = Path.home() / ".whisperapp"
+        appdata = os.getenv("APPDATA")
+        self.config_dir = Path(appdata) / ".whisperapp" if appdata else Path.home() / ".whisperapp"
         self.config_path = self.config_dir / "config.json"
         self.key_path = self.config_dir / "key.key"
         self.config_dir.mkdir(parents=True, exist_ok=True)

@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Tuple
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -15,6 +16,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
+from whisperapp.audio_recorder import AudioRecorder
 from whisperapp.transcription_service import TranscriptionService
 
 
@@ -64,8 +66,25 @@ class SettingsDialog(QDialog):
                 self.language_combo.setCurrentIndex(idx)
                 break
 
+        # Hotkey field — editable with validation
         self.hotkey_input = QLineEdit(str(settings.get("hotkey", "ctrl+shift+space")))
-        self.hotkey_input.setReadOnly(True)
+        self.hotkey_input.setPlaceholderText("e.g. ctrl+shift+space")
+
+        # Audio device selector
+        self.audio_device_combo = QComboBox()
+        self.audio_device_combo.addItem("Default", "default")
+        try:
+            for idx, name in AudioRecorder.list_input_devices():
+                display = f"{name}"
+                self.audio_device_combo.addItem(display, str(idx))
+        except Exception:
+            pass
+
+        current_device = str(settings.get("audio_device", "default"))
+        for idx in range(self.audio_device_combo.count()):
+            if str(self.audio_device_combo.itemData(idx)) == current_device:
+                self.audio_device_combo.setCurrentIndex(idx)
+                break
 
         self.auto_copy_checkbox = QCheckBox()
         self.auto_copy_checkbox.setChecked(bool(settings.get("auto_copy", True)))
@@ -89,8 +108,7 @@ class SettingsDialog(QDialog):
         form.addRow("Model", self.model_combo)
         form.addRow("Language", self.language_combo)
         form.addRow("Hotkey", self.hotkey_input)
-
-        form.addRow("", QLabel("Hotkey customization coming soon."))
+        form.addRow("Microphone", self.audio_device_combo)
         form.addRow("Automatically copy to clipboard", self.auto_copy_checkbox)
         form.addRow("Show notifications", self.show_notifications_checkbox)
 
@@ -128,6 +146,7 @@ class SettingsDialog(QDialog):
             "model": self.model_combo.currentText(),
             "language": self.language_combo.currentData(),
             "hotkey": self.hotkey_input.text().strip(),
+            "audio_device": self.audio_device_combo.currentData(),
             "auto_copy": self.auto_copy_checkbox.isChecked(),
             "show_notifications": self.show_notifications_checkbox.isChecked(),
         }

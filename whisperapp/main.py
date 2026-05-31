@@ -76,7 +76,9 @@ class WhisperTrayApp(QObject):
         self.transcription_service = TranscriptionService()
         self.transcription_service.configure(str(self.settings.get("api_key", "")))
 
-        self.audio_recorder = AudioRecorder()
+        self.audio_recorder = AudioRecorder(
+            audio_device=str(self.settings.get("audio_device", "default")),
+        )
         self.text_inserter = TextInserter()
 
         self._is_recording = False
@@ -111,6 +113,7 @@ class WhisperTrayApp(QObject):
         self.hotkey_listener = HotkeyListener(
             on_start=lambda: QTimer.singleShot(0, self.on_hotkey_pressed),
             on_stop=lambda: QTimer.singleShot(0, self.on_hotkey_released),
+            hotkey=str(self.settings.get("hotkey", "ctrl+shift+space")),
         )
 
         try:
@@ -128,7 +131,7 @@ class WhisperTrayApp(QObject):
                 (
                     "Global hotkey could not be initialized.\n\n"
                     f"{exc}\n\n"
-                    "Try running Start-WhisperApp.bat as Administrator."
+                    "Try running WhisperApp as Administrator."
                 ),
             )
 
@@ -187,7 +190,31 @@ class WhisperTrayApp(QObject):
         new_settings = dialog.get_settings()
         self.config_manager.save_settings(new_settings)
         self.settings = self.config_manager.get_settings()
+
+        # Reconfigure runtime components with new settings
         self.transcription_service.configure(str(self.settings.get("api_key", "")))
+        self.audio_recorder.audio_device = str(self.settings.get("audio_device", "default"))
+
+        # Restart hotkey listener if hotkey changed
+        old_hotkey = self.hotkey_listener._hotkey if hasattr(self.hotkey_listener, "_hotkey") else ""
+        new_hotkey = str(self.settings.get("hotkey", "ctrl+shift+space"))
+        if old_hotkey != new_hotkey.lower().replace(" ", ""):
+            try:
+                self.hotkey_listener.stop()
+            except Exception:
+                logging.exception("Failed to stop old hotkey listener")
+            self.hotkey_listener = HotkeyListener(
+                on_start=lambda: QTimer.singleShot(0, self.on_hotkey_pressed),
+                on_stop=lambda: QTimer.singleShot(0, self.on_hotkey_released),
+                hotkey=new_hotkey,
+            )
+            try:
+                self.hotkey_listener.start()
+            except Exception as exc:
+                logging.exception("Failed to restart hotkey listener")
+                self.set_status("Ready (Hotkey Error)")
+                self.notify("Hotkey Error", str(exc))
+
         self.notify("Settings Updated", "Your settings have been saved.")
 
     def on_hotkey_pressed(self) -> None:
