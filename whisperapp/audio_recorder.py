@@ -1,6 +1,7 @@
 ﻿import threading
 import uuid
 import wave
+from array import array
 from pathlib import Path
 from tempfile import gettempdir
 from typing import List, Optional
@@ -28,6 +29,8 @@ class AudioRecorder:
         self._recording_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        self._level_lock = threading.Lock()
+        self._volume_level = 0.0
 
         self.temp_dir = Path(gettempdir()) / "whisperapp"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -78,6 +81,7 @@ class AudioRecorder:
             if self._stream is not None:
                 return
             self._frames = []
+            self._set_volume_level(0.0)
             self._stop_event.clear()
             self.output_path = self.temp_dir / f"recording_{uuid.uuid4().hex}.wav"
 
@@ -98,8 +102,38 @@ class AudioRecorder:
             try:
                 data = self._stream.read(self.chunk_size, exception_on_overflow=False)
                 self._frames.append(data)
+                self._update_volume_level(data)
             except Exception:
                 break
+        self._set_volume_level(0.0)
+
+    def _set_volume_level(self, value: float) -> None:
+        with self._level_lock:
+            self._volume_level = max(0.0, min(1.0, value))
+
+    def _update_volume_level(self, data: bytes) -> None:
+        if not data:
+            self._set_volume_level(0.0)
+            return
+
+        samples = array("h")
+        samples.frombytes(data)
+        if not samples:
+            self._set_volume_level(0.0)
+            return
+
+        square_sum = sum(sample * sample for sample in samples)
+        rms = (square_sum / len(samples)) ** 0.5
+        normalized = min(1.0, rms / 32768.0)
+
+        with self._level_lock:
+            current = self._volume_level
+            smoothing = 0.35 if normalized > current else 0.12
+            self._volume_level = current + (normalized - current) * smoothing
+
+    def get_volume_level(self) -> float:
+        with self._level_lock:
+            return self._volume_level
 
     def stop_recording(self) -> Optional[Path]:
         with self._lock:
@@ -117,6 +151,7 @@ class AudioRecorder:
                 stream.close()
             except Exception:
                 pass
+            self._set_volume_level(0.0)
 
             if not self._frames:
                 return None
@@ -141,6 +176,7 @@ class AudioRecorder:
                 except Exception:
                     pass
                 self._stream = None
+            self._set_volume_level(0.0)
             try:
                 self._pyaudio.terminate()
             except Exception:

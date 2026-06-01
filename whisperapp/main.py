@@ -3,6 +3,7 @@ import math
 import sys
 from pathlib import Path
 from tempfile import gettempdir
+from typing import Callable
 
 from PyQt5.QtCore import QObject, QRectF, QThread, QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
@@ -67,7 +68,7 @@ class TranscriptionThread(QThread):
 
 
 class RecordingIndicator(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, volume_provider: Callable[[], float] | None = None) -> None:
         super().__init__(
             None,
             Qt.Tool
@@ -77,14 +78,18 @@ class RecordingIndicator(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setFixedSize(180, 44)
+        self.setFixedSize(220, 52)
+        self._volume_provider = volume_provider or (lambda: 0.0)
         self._phase = 0.0
+        self._display_level = 0.0
+        self._noise_floor = 0.022
         self._timer = QTimer(self)
         self._timer.setInterval(33)
         self._timer.timeout.connect(self._tick)
 
     def show_indicator(self) -> None:
         self._phase = 0.0
+        self._display_level = 0.0
         self._position_center_screen()
         self._timer.start()
         self.show()
@@ -105,72 +110,103 @@ class RecordingIndicator(QWidget):
         )
 
     def _tick(self) -> None:
-        self._phase = (self._phase + 0.22) % (math.pi * 2)
+        raw_level = max(0.0, min(1.0, self._volume_provider()))
+        active_level = max(0.0, (raw_level - self._noise_floor) / (1.0 - self._noise_floor))
+        active_level = active_level ** 0.42
+
+        smoothing = 0.34 if active_level > self._display_level else 0.09
+        self._display_level += (active_level - self._display_level) * smoothing
+        if self._display_level < 0.006 and active_level <= 0.0:
+            self._display_level = 0.0
+
+        if active_level > 0.0 or self._display_level > 0.0:
+            self._phase = (self._phase + 0.024 + self._display_level * 0.16) % (math.pi * 2)
         self.update()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
+        level = self._display_level
         bg = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
         frame = QPainterPath()
-        frame.moveTo(bg.left() + 10, bg.top())
-        frame.lineTo(bg.right() - 10, bg.top())
-        frame.lineTo(bg.right(), bg.top() + 10)
-        frame.lineTo(bg.right(), bg.bottom() - 10)
-        frame.lineTo(bg.right() - 10, bg.bottom())
-        frame.lineTo(bg.left() + 10, bg.bottom())
-        frame.lineTo(bg.left(), bg.bottom() - 10)
-        frame.lineTo(bg.left(), bg.top() + 10)
+        frame.moveTo(bg.left() + 14, bg.top())
+        frame.lineTo(bg.right() - 22, bg.top())
+        frame.lineTo(bg.right(), bg.top() + 14)
+        frame.lineTo(bg.right() - 9, bg.bottom() - 5)
+        frame.lineTo(bg.right() - 28, bg.bottom())
+        frame.lineTo(bg.left() + 12, bg.bottom())
+        frame.lineTo(bg.left(), bg.bottom() - 13)
+        frame.lineTo(bg.left() + 8, bg.top() + 8)
         frame.closeSubpath()
 
-        painter.setBrush(QColor(5, 8, 12, 232))
+        painter.setBrush(QColor(3, 6, 9, 238))
         painter.setPen(Qt.NoPen)
         painter.drawPath(frame)
 
-        glow = QColor(255, 47, 47, 90)
-        painter.setPen(QPen(glow, 4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        edge_alpha = 80 + int(level * 125)
+        painter.setPen(QPen(QColor(255, 20, 20, edge_alpha), 6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         painter.drawPath(frame)
-        painter.setPen(QPen(QColor(255, 76, 58, 230), 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setPen(QPen(QColor(255, 70, 45, 215), 1.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         painter.drawPath(frame)
+        painter.setPen(QPen(QColor(255, 180, 120, 95), 0.7, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawLine(17, 7, self.width() - 32, 7)
 
-        painter.setPen(QPen(QColor(255, 65, 50, 38), 1))
-        for y in range(9, self.height(), 7):
-            painter.drawLine(14, y, self.width() - 14, y)
+        painter.setPen(QPen(QColor(255, 54, 42, 23), 1))
+        for y in range(11, self.height() - 8, 8):
+            painter.drawLine(17, y, self.width() - 22, y)
+
+        painter.setPen(QPen(QColor(38, 235, 188, 52), 1))
+        for x in range(46, self.width() - 22, 22):
+            painter.drawLine(x, 13, x + 7, 13)
+        painter.setPen(QPen(QColor(82, 155, 255, 38), 1))
+        for x in range(58, self.width() - 30, 28):
+            painter.drawLine(x, 39, x + 5, 39)
 
         painter.setPen(Qt.NoPen)
-        pulse = 8 + math.sin(self._phase) * 2
-        painter.setBrush(QColor(255, 34, 34, 54))
+        pulse = 8 + level * 7
+        painter.setBrush(QColor(255, 31, 28, 36 + int(level * 90)))
         painter.drawEllipse(QRectF(21 - pulse / 2, 22 - pulse / 2, pulse, pulse))
-        painter.setBrush(QColor(255, 55, 45))
-        painter.drawEllipse(QRectF(18, 19, 6, 6))
+        painter.setBrush(QColor(255, 64, 48, 150 + int(level * 85)))
+        painter.drawEllipse(QRectF(17.5, 21.5, 7, 7))
+        painter.setBrush(QColor(255, 205, 145, 145 + int(level * 70)))
+        painter.drawEllipse(QRectF(19.7, 23.7, 2.6, 2.6))
 
-        width = 118
-        left = 42
-        center_y = 22
+        width = 154
+        left = 45
+        center_y = 27
+        amplitude = 0.45 + level * 18.0
         path = QPainterPath()
         for x in range(width + 1):
-            y = center_y + (
-                math.sin((x * 0.18) + self._phase * 2.2) * 7
-                + math.sin((x * 0.43) - self._phase * 1.4) * 2.5
+            taper = math.sin((x / width) * math.pi)
+            signal = (
+                math.sin((x * 0.14) + self._phase * 1.75)
+                + math.sin((x * 0.31) - self._phase * 1.1) * 0.5
+                + math.sin((x * 0.055) + self._phase * 0.7) * 0.72
             )
+            y = center_y + signal * amplitude * (0.18 + taper * 0.82)
             if x == 0:
                 path.moveTo(left + x, y)
             else:
                 path.lineTo(left + x, y)
 
-        painter.setPen(QPen(QColor(255, 28, 28, 52), 10, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        glow_alpha = 34 + int(level * 80)
+        core_alpha = 125 + int(level * 120)
+        painter.setPen(QPen(QColor(255, 22, 22, glow_alpha), 12, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         painter.drawPath(path)
-        painter.setPen(QPen(QColor(255, 45, 36, 130), 6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setPen(QPen(QColor(255, 44, 34, 80 + int(level * 90)), 6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         painter.drawPath(path)
-        painter.setPen(QPen(QColor(255, 92, 62, 245), 2.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setPen(QPen(QColor(255, 96, 64, core_alpha), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(path)
+        painter.setPen(QPen(QColor(255, 218, 160, 70 + int(level * 95)), 0.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         painter.drawPath(path)
 
-        sweep_x = left + ((math.sin(self._phase * 1.6) + 1) / 2) * width
-        painter.setPen(QPen(QColor(255, 180, 105, 190), 1.2))
-        painter.drawLine(left - 5, center_y, left + width + 5, center_y)
-        painter.setPen(QPen(QColor(255, 210, 135, 165), 2))
-        painter.drawLine(int(sweep_x), 10, int(sweep_x), 34)
+        painter.setPen(QPen(QColor(255, 170, 105, 70), 0.7))
+        painter.drawLine(left - 3, center_y, left + width + 3, center_y)
+
+        painter.setPen(QPen(QColor(255, 54, 36, 55), 1))
+        painter.drawLine(33, 10, 42, self.height() - 9)
+        painter.drawLine(self.width() - 23, 9, self.width() - 39, self.height() - 8)
 
 
 class WhisperTrayApp(QObject):
@@ -193,7 +229,7 @@ class WhisperTrayApp(QObject):
         self._is_recording = False
         self._is_transcribing = False
         self._worker_thread = None
-        self.recording_indicator = RecordingIndicator()
+        self.recording_indicator = RecordingIndicator(self.audio_recorder.get_volume_level)
 
         self.tray = QSystemTrayIcon(self._create_icon(), self.app)
         self.menu = QMenu()
@@ -264,11 +300,46 @@ class WhisperTrayApp(QObject):
         pixmap.fill(QColor(0, 0, 0, 0))
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(QColor(28, 89, 170))
-        painter.setPen(QColor(20, 65, 120))
-        painter.drawEllipse(4, 4, 56, 56)
-        painter.setPen(QColor(255, 255, 255))
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, "W")
+
+        outer = QPainterPath()
+        outer.moveTo(32, 4)
+        outer.lineTo(57, 18)
+        outer.lineTo(52, 48)
+        outer.lineTo(32, 60)
+        outer.lineTo(12, 48)
+        outer.lineTo(7, 18)
+        outer.closeSubpath()
+
+        inner = QPainterPath()
+        inner.moveTo(32, 13)
+        inner.lineTo(48, 23)
+        inner.lineTo(44, 43)
+        inner.lineTo(32, 51)
+        inner.lineTo(20, 43)
+        inner.lineTo(16, 23)
+        inner.closeSubpath()
+
+        painter.setBrush(QColor(2, 5, 8, 245))
+        painter.setPen(QPen(QColor(255, 28, 24, 150), 5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(outer)
+        painter.setPen(QPen(QColor(255, 95, 58, 235), 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(outer)
+
+        painter.setBrush(QColor(12, 16, 20, 210))
+        painter.setPen(QPen(QColor(255, 46, 34, 185), 1.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(inner)
+
+        painter.setPen(QPen(QColor(255, 52, 38, 230), 3.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawLine(21, 34, 30, 24)
+        painter.drawLine(30, 24, 43, 39)
+        painter.setPen(QPen(QColor(255, 218, 150, 180), 1.1, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawLine(22, 34, 30, 25)
+        painter.drawLine(30, 25, 42, 38)
+
+        painter.setPen(QPen(QColor(38, 235, 188, 105), 1))
+        painter.drawLine(21, 20, 31, 20)
+        painter.setPen(QPen(QColor(82, 155, 255, 82), 1))
+        painter.drawLine(34, 47, 44, 47)
         painter.end()
         return QIcon(pixmap)
 
