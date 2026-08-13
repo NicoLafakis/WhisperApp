@@ -3,7 +3,7 @@
 ; Usage: Compile with ISCC.exe installer.iss
 
 #define MyAppName "WhisperApp"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "WhisperApp"
 #define MyAppExeName "WhisperApp.exe"
 

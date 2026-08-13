@@ -3,3 +3,8 @@
 .venv/
 .whisperapp/
 **/node_modules/
+build/
+dist/
+demo/
+installer/*.exe
+installer/*.zip
