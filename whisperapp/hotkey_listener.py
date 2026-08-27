@@ -1,5 +1,5 @@
 ﻿import logging
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import keyboard
 
@@ -48,19 +48,61 @@ class HotkeyListener:
             raise
 
     def stop(self) -> None:
-        if self._press_hook is not None:
-            try:
-                keyboard.unhook(self._press_hook)
-            except Exception:
-                logger.exception("Failed to unhook press handler")
-            self._press_hook = None
-        if self._release_hook is not None:
-            try:
-                keyboard.unhook(self._release_hook)
-            except Exception:
-                logger.exception("Failed to unhook release handler")
-            self._release_hook = None
+        hooks = [self._press_hook, self._release_hook]
+        self._press_hook = None
+        self._release_hook = None
+
+        clean = True
+        for hook in hooks:
+            if hook is not None and not self._unhook(hook):
+                clean = False
+
+        if not clean:
+            self._unhook_everything()
+
+        self._active = False
         logger.info("Hotkey listener stopped")
+
+    def _unhook(self, hook: object) -> bool:
+        """Remove one hook, working around the ``keyboard`` library's shared-key entry.
+
+        ``keyboard.hook_key`` files every registration under ``_hooks[key]`` as well as
+        under the callback, so a press hook and a release hook on the same key overwrite
+        each other there. The remove function deletes ``_hooks[key]`` *before* it drops
+        the callback from the listener's key store, so the second unhook raises
+        ``KeyError`` on the missing entry and the handler is left live - the leak behind
+        the ``KeyError: 'space'`` tracebacks that flooded runtime.log.
+
+        Restoring ``_hooks[key]`` for the hook we are about to remove lets the library's
+        own remove function run to completion, which is what actually unregisters the
+        handler. Returns True when the hook was removed.
+        """
+        registry = getattr(keyboard, "_hooks", None)
+        if isinstance(registry, dict):
+            registry[self._primary_key] = hook
+
+        try:
+            keyboard.unhook(hook)
+            return True
+        except Exception:
+            logger.debug(
+                "Targeted unhook of %r failed; falling back to unhook_all",
+                self._primary_key,
+                exc_info=True,
+            )
+            return False
+
+    @staticmethod
+    def _unhook_everything() -> None:
+        """Last resort: drop every keyboard hook in the process.
+
+        Safe here because WhisperApp is the only consumer of ``keyboard`` hooks in its
+        own process, and leaving an orphaned handler registered is strictly worse.
+        """
+        try:
+            keyboard.unhook_all()
+        except Exception:
+            logger.debug("keyboard.unhook_all() failed", exc_info=True)
 
     def _modifiers_pressed(self) -> bool:
         for mod in self._modifiers:

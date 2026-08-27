@@ -1,12 +1,26 @@
-﻿import threading
+﻿import logging
+import threading
+import time
 import uuid
 import wave
 from array import array
 from pathlib import Path
 from tempfile import gettempdir
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import pyaudio
+
+
+logger = logging.getLogger(__name__)
+
+
+# Hard ceiling on a single take. A stuck push-to-talk once ran for ~83 minutes and
+# produced a 160 MB WAV that could never be uploaded. Ten minutes at the recorder's own
+# format (16 kHz mono 16-bit) is 19.2 MB, comfortably inside OpenAI's 25 MB limit.
+MAX_RECORDING_SECONDS = 600.0
+
+# How long to wait for the capture thread to notice the stop flag and exit.
+_THREAD_JOIN_TIMEOUT_SECONDS = 1.5
 
 
 class AudioRecorder:
@@ -16,12 +30,16 @@ class AudioRecorder:
         channels: int = 1,
         chunk_size: int = 1024,
         audio_device: Optional[str] = None,
+        max_duration_seconds: float = MAX_RECORDING_SECONDS,
+        on_max_duration_reached: Optional[Callable[[Optional[Path]], None]] = None,
     ) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
         self.chunk_size = chunk_size
         self.audio_format = pyaudio.paInt16
         self.audio_device = audio_device
+        self.max_duration_seconds = max_duration_seconds
+        self.on_max_duration_reached = on_max_duration_reached
 
         self._pyaudio = pyaudio.PyAudio()
         self._stream = None
@@ -31,10 +49,24 @@ class AudioRecorder:
         self._lock = threading.Lock()
         self._level_lock = threading.Lock()
         self._volume_level = 0.0
+        self._hit_duration_limit = False
+        self._finalized_path: Optional[Path] = None
 
         self.temp_dir = Path(gettempdir()) / "whisperapp"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.output_path: Optional[Path] = None
+
+    @property
+    def is_recording(self) -> bool:
+        return self._stream is not None
+
+    @property
+    def hit_duration_limit(self) -> bool:
+        """True when the last take was cut short by the duration cap.
+
+        Reset by :meth:`start_recording`.
+        """
+        return self._hit_duration_limit
 
     def _resolve_input_device_index(self) -> Optional[int]:
         """Resolve the PyAudio device index from a device name/id string.
@@ -83,6 +115,8 @@ class AudioRecorder:
             self._frames = []
             self._set_volume_level(0.0)
             self._stop_event.clear()
+            self._hit_duration_limit = False
+            self._finalized_path = None
             self.output_path = self.temp_dir / f"recording_{uuid.uuid4().hex}.wav"
 
             device_index = self._resolve_input_device_index()
@@ -98,14 +132,53 @@ class AudioRecorder:
             self._recording_thread.start()
 
     def _record(self) -> None:
+        deadline: Optional[float] = None
+        if self.max_duration_seconds and self.max_duration_seconds > 0:
+            deadline = time.monotonic() + self.max_duration_seconds
+
+        reached_limit = False
         while not self._stop_event.is_set() and self._stream is not None:
             try:
                 data = self._stream.read(self.chunk_size, exception_on_overflow=False)
                 self._frames.append(data)
                 self._update_volume_level(data)
             except Exception:
+                # Device unplugged or stream closed under us: end the take, keep frames.
+                logger.debug("Input stream read failed; ending capture", exc_info=True)
+                break
+            if deadline is not None and time.monotonic() >= deadline:
+                reached_limit = True
                 break
         self._set_volume_level(0.0)
+
+        if reached_limit:
+            self._auto_stop()
+
+    def _auto_stop(self) -> None:
+        """Cut the take short at the duration cap, from inside the capture thread.
+
+        The WAV is finalized here rather than discarded: push-to-talk does eventually
+        release, and a late :meth:`stop_recording` must still get the audio back.
+        """
+        self._stop_event.set()
+        with self._lock:
+            self._hit_duration_limit = True
+            path = self._finalize_locked()
+
+        logger.warning(
+            "Recording hit the %gs duration cap and was stopped automatically",
+            self.max_duration_seconds,
+        )
+
+        callback = self.on_max_duration_reached
+        if callback is None:
+            return
+        # Outside the lock: the callback hands off to the UI and must never be able to
+        # deadlock against a concurrent stop_recording().
+        try:
+            callback(path)
+        except Exception:
+            logger.exception("on_max_duration_reached callback failed")
 
     def _set_volume_level(self, value: float) -> None:
         with self._level_lock:
@@ -135,52 +208,77 @@ class AudioRecorder:
         with self._level_lock:
             return self._volume_level
 
+    def _join_recording_thread(self) -> None:
+        """Wait for the capture thread, never from the capture thread itself.
+
+        The guard matters: the auto-stop path runs on that thread and can reach
+        :meth:`stop_recording` through its callback.
+        """
+        thread = self._recording_thread
+        if thread is None or thread is threading.current_thread():
+            return
+        thread.join(timeout=_THREAD_JOIN_TIMEOUT_SECONDS)
+
+    def _finalize_locked(self) -> Optional[Path]:
+        """Close the stream and write the WAV. Caller must hold ``self._lock``."""
+        if self._stream is None:
+            # Already finalized - by the duration cap, or by an earlier stop.
+            return self._finalized_path
+
+        stream = self._stream
+        try:
+            stream.stop_stream()
+            stream.close()
+        except Exception:
+            # Expected when the device vanished mid-take; the frames are already ours.
+            logger.debug("Closing the input stream failed", exc_info=True)
+        self._stream = None
+        self._set_volume_level(0.0)
+
+        frames = self._frames
+        self._frames = []
+        if not frames:
+            self._finalized_path = None
+            return None
+
+        path = self.output_path
+        with wave.open(str(path), "wb") as wf:
+            wf.setnchannels(self.channels)
+            wf.setsampwidth(self._pyaudio.get_sample_size(self.audio_format))
+            wf.setframerate(self.sample_rate)
+            wf.writeframes(b"".join(frames))
+
+        self._cleanup_old_recordings()
+        self._finalized_path = path
+        return path
+
     def stop_recording(self) -> Optional[Path]:
+        # The join happens outside the locked region on purpose: the capture thread
+        # takes the same lock to finalize an auto-stop, so joining while holding it
+        # would deadlock for the full join timeout.
+        self._stop_event.set()
+        self._join_recording_thread()
         with self._lock:
-            if self._stream is None:
-                return None
-            self._stop_event.set()
-            if self._recording_thread is not None:
-                self._recording_thread.join(timeout=1.5)
-
-            stream = self._stream
-            self._stream = None
-
-            try:
-                stream.stop_stream()
-                stream.close()
-            except Exception:
-                pass
-            self._set_volume_level(0.0)
-
-            if not self._frames:
-                return None
-
-            path = self.output_path
-            with wave.open(str(path), "wb") as wf:
-                wf.setnchannels(self.channels)
-                wf.setsampwidth(self._pyaudio.get_sample_size(self.audio_format))
-                wf.setframerate(self.sample_rate)
-                wf.writeframes(b"".join(self._frames))
-
-            self._cleanup_old_recordings()
-            return path
+            return self._finalize_locked()
 
     def terminate(self) -> None:
+        self._stop_event.set()
+        self._join_recording_thread()
         with self._lock:
-            self._stop_event.set()
             if self._stream is not None:
                 try:
                     self._stream.stop_stream()
                     self._stream.close()
                 except Exception:
-                    pass
+                    # Shutdown path: a stream that will not close is not worth crashing on.
+                    logger.debug("Closing the input stream failed", exc_info=True)
                 self._stream = None
             self._set_volume_level(0.0)
             try:
                 self._pyaudio.terminate()
             except Exception:
-                pass
+                # Shutdown path: the process is going away regardless.
+                logger.debug("PyAudio terminate failed", exc_info=True)
 
     @staticmethod
     def list_input_devices() -> List[tuple]:

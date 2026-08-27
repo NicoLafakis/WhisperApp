@@ -1,9 +1,11 @@
 ﻿from __future__ import annotations
 
+import logging
 from typing import Dict, List, Tuple
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -17,7 +19,15 @@ from PyQt5.QtWidgets import (
 )
 
 from whisperapp.audio_recorder import AudioRecorder
-from whisperapp.transcription_service import TranscriptionService
+from whisperapp.transcription_service import (
+    BILLING_URL,
+    ERROR_HEADLINES,
+    TranscriptionErrorKind,
+    TranscriptionService,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 LANGUAGE_OPTIONS: List[Tuple[str, str]] = [
@@ -78,7 +88,8 @@ class SettingsDialog(QDialog):
                 display = f"{name}"
                 self.audio_device_combo.addItem(display, str(idx))
         except Exception:
-            pass
+            # No enumerable input devices: the "Default" entry alone still works.
+            logger.warning("Could not enumerate input devices", exc_info=True)
 
         current_device = str(settings.get("audio_device", "default"))
         for idx in range(self.audio_device_combo.count()):
@@ -131,14 +142,29 @@ class SettingsDialog(QDialog):
 
         self.test_button.setEnabled(False)
         self.test_button.setText("Testing...")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self._service.test_api_key(api_key)
-            QMessageBox.information(self, "API Key Valid", "API key is valid.")
-        except Exception as exc:
-            QMessageBox.critical(self, "API Key Error", str(exc))
+            result = self._service.test_api_key(api_key)
         finally:
+            QApplication.restoreOverrideCursor()
             self.test_button.setEnabled(True)
             self.test_button.setText("Test API Key")
+
+        if result.ok:
+            QMessageBox.information(
+                self,
+                "API Key Valid",
+                "API key is valid and can transcribe audio.",
+            )
+            return
+
+        # Show the API's own wording: the quota body names the billing page, and a
+        # generic "invalid key" here is what sent the last investigation the wrong way.
+        title = ERROR_HEADLINES.get(result.error_kind, "API Key Error")
+        detail = result.message.strip() or "The API key check failed."
+        if result.error_kind is TranscriptionErrorKind.QUOTA_EXHAUSTED:
+            detail = f"{detail}\n\nAdd credits at:\n{BILLING_URL}"
+        QMessageBox.critical(self, title, detail)
 
     def get_settings(self) -> Dict[str, object]:
         return {

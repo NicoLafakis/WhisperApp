@@ -1,9 +1,10 @@
-﻿import logging
+﻿import ctypes
+import logging
 import math
 import sys
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Callable
+from typing import Callable, Optional
 
 from PyQt5.QtCore import QObject, QRectF, QThread, QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
@@ -22,11 +23,22 @@ from whisperapp.config_manager import ConfigManager
 from whisperapp.hotkey_listener import HotkeyListener
 from whisperapp.settings_dialog import SettingsDialog
 from whisperapp.text_inserter import TextInserter
-from whisperapp.transcription_service import TranscriptionService
+from whisperapp.transcription_service import (
+    BILLING_URL,
+    ERROR_HEADLINES,
+    ERROR_STATUSES,
+    TranscriptionErrorKind,
+    TranscriptionResult,
+    TranscriptionService,
+)
 
 
 LOG_DIR = Path(gettempdir()) / "whisperapp"
 LOG_FILE = LOG_DIR / "runtime.log"
+
+# httpx and the OpenAI SDK log every request and retry at INFO. Left on, they drown the
+# app's own lines - runtime.log reached 1.4 MB and the real 429 was buried in it.
+NOISY_LOGGERS = ("httpx", "httpcore", "openai", "urllib3")
 
 
 def configure_logging() -> None:
@@ -39,6 +51,8 @@ def configure_logging() -> None:
             logging.StreamHandler(sys.stdout),
         ],
     )
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def handle_uncaught_exception(exc_type, exc_value, exc_traceback) -> None:
@@ -48,8 +62,83 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback) -> None:
     )
 
 
+# Per-session, so each logged-in user still gets their own tray app. The name is fixed
+# and unguessable-ish rather than random: a second instance has to find the same one.
+SINGLE_INSTANCE_MUTEX_NAME = "Local\\WhisperApp-SingleInstance-0f6b1c94b7d24e0a"
+_ERROR_ALREADY_EXISTS = 183
+
+
+class SingleInstanceGuard:
+    """Windows named-mutex guard against a second WhisperApp process.
+
+    Two instances double-register the global push-to-talk hotkey and fight over it,
+    which is what happened on 2026-08-27.
+
+    A kernel mutex is the documented way to do this. Its lifetime is owned by the OS:
+    "the system closes the handle automatically when the process terminates", so a
+    crashed instance releases it exactly like a clean exit and the app can never lock
+    itself out with a stale lock file.
+    https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createmutexw
+    """
+
+    def __init__(self, name: str = SINGLE_INSTANCE_MUTEX_NAME) -> None:
+        self._name = name
+        self._handle: Optional[int] = None
+
+    def acquire(self) -> bool:
+        """True if this process may run; False if another instance already holds it.
+
+        Fails open: if the guard itself cannot be set up, the app still starts.
+        """
+        if not sys.platform.startswith("win"):
+            return True
+
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CreateMutexW.argtypes = (
+                ctypes.c_void_p,
+                ctypes.c_bool,
+                ctypes.c_wchar_p,
+            )
+            kernel32.CreateMutexW.restype = ctypes.c_void_p
+            # bInitialOwner=False, per the docs: with several processes racing to create
+            # the same named mutex, ownership would otherwise be ambiguous.
+            handle = kernel32.CreateMutexW(None, False, self._name)
+            last_error = ctypes.get_last_error()
+        except Exception:
+            logging.warning("Single-instance guard unavailable", exc_info=True)
+            return True
+
+        if not handle:
+            logging.warning("CreateMutexW failed (error %d); starting anyway", last_error)
+            return True
+
+        if last_error == _ERROR_ALREADY_EXISTS:
+            self._close(handle)
+            return False
+
+        self._handle = handle
+        return True
+
+    def release(self) -> None:
+        handle, self._handle = self._handle, None
+        if handle:
+            self._close(handle)
+
+    @staticmethod
+    def _close(handle: int) -> None:
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+            kernel32.CloseHandle.restype = ctypes.c_bool
+            kernel32.CloseHandle(handle)
+        except Exception:
+            # The OS reclaims the handle at process exit regardless.
+            logging.debug("CloseHandle on the instance mutex failed", exc_info=True)
+
+
 class TranscriptionThread(QThread):
-    finished_text = pyqtSignal(str)
+    completed = pyqtSignal(object)  # TranscriptionResult
 
     def __init__(self, service: TranscriptionService, wav_path: Path, model: str, language: str):
         super().__init__()
@@ -59,12 +148,19 @@ class TranscriptionThread(QThread):
         self._language = language
 
     def run(self) -> None:
-        text = self._service.transcribe(
-            wav_path=self._wav_path,
-            model=self._model,
-            language=self._language,
-        )
-        self.finished_text.emit(text)
+        try:
+            result = self._service.transcribe(
+                wav_path=self._wav_path,
+                model=self._model,
+                language=self._language,
+            )
+        except Exception as exc:
+            logging.exception("Transcription worker crashed")
+            result = TranscriptionResult(
+                error_kind=TranscriptionErrorKind.UNKNOWN,
+                message=str(exc),
+            )
+        self.completed.emit(result)
 
 
 class RecordingIndicator(QWidget):
@@ -210,6 +306,9 @@ class RecordingIndicator(QWidget):
 
 
 class WhisperTrayApp(QObject):
+    # Emitted from the recorder's capture thread; Qt queues it onto the UI thread.
+    max_duration_reached = pyqtSignal(object)  # Optional[Path]
+
     def __init__(self, app: QApplication):
         super().__init__()
         self.app = app
@@ -223,12 +322,17 @@ class WhisperTrayApp(QObject):
 
         self.audio_recorder = AudioRecorder(
             audio_device=str(self.settings.get("audio_device", "default")),
+            on_max_duration_reached=self.max_duration_reached.emit,
         )
+        self.max_duration_reached.connect(self._on_max_duration_reached)
         self.text_inserter = TextInserter()
 
         self._is_recording = False
         self._is_transcribing = False
         self._worker_thread = None
+        # The kind of the failure currently on screen, so a run of identical failures
+        # does not stack up a modal dialog per attempt.
+        self._last_failure_kind: Optional[TranscriptionErrorKind] = None
         self.recording_indicator = RecordingIndicator(self.audio_recorder.get_volume_level)
 
         self.tray = QSystemTrayIcon(self._create_icon(), self.app)
@@ -255,6 +359,7 @@ class WhisperTrayApp(QObject):
 
         self.tray.setContextMenu(self.menu)
         self.tray.show()
+        self.set_status("Ready")
 
         self.hotkey_listener = HotkeyListener(
             on_start=lambda: QTimer.singleShot(0, self.on_hotkey_pressed),
@@ -345,9 +450,15 @@ class WhisperTrayApp(QObject):
 
     def set_status(self, text: str) -> None:
         self.status_action.setText(f"Status: {text}")
+        self.tray.setToolTip(f"WhisperApp - {text}")
 
-    def notify(self, title: str, text: str) -> None:
-        self.tray.showMessage(title, text, QSystemTrayIcon.Information, 5000)
+    def notify(
+        self,
+        title: str,
+        text: str,
+        icon: QSystemTrayIcon.MessageIcon = QSystemTrayIcon.Information,
+    ) -> None:
+        self.tray.showMessage(title, text, icon, 5000)
 
     def show_welcome(self) -> None:
         QMessageBox.information(
@@ -374,6 +485,8 @@ class WhisperTrayApp(QObject):
 
         # Reconfigure runtime components with new settings
         self.transcription_service.configure(str(self.settings.get("api_key", "")))
+        # New settings start a new failure episode: let the next failure speak up again.
+        self._last_failure_kind = None
         self.audio_recorder.audio_device = str(self.settings.get("audio_device", "default"))
 
         # Restart hotkey listener if hotkey changed
@@ -433,28 +546,62 @@ class WhisperTrayApp(QObject):
             self.notify("No Audio Recorded", "No audio captured for transcription.")
             return
 
+        self._start_transcription(wav_path)
+
+    def _on_max_duration_reached(self, wav_path) -> None:
+        """The recorder cut a runaway take short. Say why, then transcribe what we got."""
+        if not self._is_recording:
+            return
+
+        self._is_recording = False
+        self.recording_indicator.hide_indicator()
+
+        cap = self.audio_recorder.max_duration_seconds
+        limit = f"{cap / 60:.0f} minute" if cap >= 90 else f"{cap:g} second"
+        logging.warning("Recording stopped at the %s cap", limit)
+        self.notify(
+            "Recording Stopped",
+            f"Recording hit the {limit} limit and stopped on its own. "
+            "The hotkey may have been stuck.",
+            QSystemTrayIcon.Warning,
+        )
+
+        if wav_path is None:
+            self.set_status("Ready")
+            return
+
+        self.set_status("Transcribing...")
+        self._is_transcribing = True
+        self._start_transcription(wav_path)
+
+    def _start_transcription(self, wav_path: Path) -> None:
         self._worker_thread = TranscriptionThread(
             service=self.transcription_service,
             wav_path=wav_path,
             model=str(self.settings.get("model", "whisper-1")),
             language=str(self.settings.get("language", "en")),
         )
-        self._worker_thread.finished_text.connect(self._on_transcription_finished)
+        self._worker_thread.completed.connect(self._on_transcription_finished)
         self._worker_thread.start()
 
-    def _on_transcription_finished(self, result_text: str) -> None:
+    def _on_transcription_finished(self, result: TranscriptionResult) -> None:
         self._is_transcribing = False
-        self.set_status("Ready")
 
-        text = (result_text or "").strip()
+        if not result.ok:
+            self._report_failure(result.error_kind, result.message)
+            return
+
+        text = result.text.strip()
         if not text:
-            self.notify("Transcription Error", "Error: Empty transcription response")
+            # A 200 with nothing in it: still a failure from where the user is sitting.
+            self._report_failure(
+                TranscriptionErrorKind.UNKNOWN,
+                "The transcription came back empty. Nothing was heard in the recording.",
+            )
             return
 
-        if text.startswith("Error:"):
-            self.notify("Transcription Error", text)
-            return
-
+        self._last_failure_kind = None
+        self.set_status("Ready")
         self.text_inserter.insert_text(
             text=text,
             auto_copy=bool(self.settings.get("auto_copy", True)),
@@ -462,6 +609,43 @@ class WhisperTrayApp(QObject):
 
         if bool(self.settings.get("show_notifications", True)):
             self.notify("Transcription Complete", text)
+
+    def _report_failure(self, kind: TranscriptionErrorKind, message: str) -> None:
+        """Surface a failure so it cannot be mistaken for success.
+
+        The tray status used to be reset to "Ready" before notifying, which made a total
+        failure look identical to a clean run once the balloon faded. The status now
+        holds the failure until the next recording starts, and it says which failure.
+        """
+        headline = ERROR_HEADLINES.get(kind, "Transcription Failed")
+        detail = (message or "").strip() or "The API returned no detail. See the log."
+        logging.error("Transcription failed (%s): %s", kind.name, detail)
+
+        self.set_status(ERROR_STATUSES.get(kind, "Failed"))
+        self.notify(headline, detail, QSystemTrayIcon.Critical)
+
+        is_new_episode = kind is not self._last_failure_kind
+        self._last_failure_kind = kind
+
+        # A balloon is easy to miss and Focus Assist can swallow it outright. Quota
+        # exhaustion is the one failure the user can only fix off-app, so it gets a
+        # modal naming the billing page - once per episode, not once per attempt.
+        if kind is TranscriptionErrorKind.QUOTA_EXHAUSTED and is_new_episode:
+            QMessageBox.critical(
+                None,
+                headline,
+                (
+                    f"{detail}\n\n"
+                    f"Add credits at:\n{BILLING_URL}\n\n"
+                    "WhisperApp cannot transcribe until the account has credit."
+                ),
+            )
+        elif kind is TranscriptionErrorKind.NOT_CONFIGURED and is_new_episode:
+            QMessageBox.warning(
+                None,
+                headline,
+                f"{detail}\n\nOpen Settings from the tray icon to add your OpenAI API key.",
+            )
 
     def cleanup(self) -> None:
         try:
@@ -485,6 +669,22 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("WhisperApp")
     app.setQuitOnLastWindowClosed(False)
+
+    guard = SingleInstanceGuard()
+    if not guard.acquire():
+        logging.warning("Another WhisperApp instance is already running; exiting")
+        QMessageBox.information(
+            None,
+            "WhisperApp Already Running",
+            (
+                "WhisperApp is already running.\n\n"
+                "Look for its icon in the system tray, next to the clock - you may need "
+                "to click the arrow to show hidden icons."
+            ),
+        )
+        return 0
+
+    app.aboutToQuit.connect(guard.release)
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         logging.error("System tray is not available")
