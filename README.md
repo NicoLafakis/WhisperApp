@@ -10,7 +10,7 @@ Implemented baseline behavior:
 - Settings persisted to `%USERPROFILE%\\.whisperapp`
 - API key encrypted with Fernet in `config.json`
 - Push-to-talk recording on `Ctrl+Shift+Space` (space press/release with ctrl+shift held)
-- WAV recording to `%TEMP%\\whisperapp\\recording.wav`
+- WAV recording to `<Documents>\\WhisperApp\\recordings\\recording_<id>.wav` (last 25 kept)
 - OpenAI transcription via `client.audio.transcriptions.create(...)`
 - Clipboard + synthetic `Ctrl+V` insertion flow
 - Notification behavior aligned with recovered app

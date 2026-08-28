@@ -268,13 +268,18 @@ class FakePyAudioModule:
 def fake_pyaudio(monkeypatch, tmp_path) -> FakePyAudioModule:
     """Replace PyAudio with an in-memory fake and redirect recordings to tmp_path.
 
-    The temp-dir redirect matters: AudioRecorder prunes old WAVs in its output
-    directory, and that directory is the one the installed app really uses.
+    Both redirects matter. AudioRecorder prunes old WAVs in its output directory and
+    migrates takes out of the legacy one, and both of those are directories the
+    installed app really uses - the Documents one holds the user's own recordings.
     """
     from whisperapp import audio_recorder
 
     fake = FakePyAudioModule()
     monkeypatch.setattr(audio_recorder, "pyaudio", fake)
+    # A separate subfolder, not tmp_path itself: on Windows the legacy "whisperapp"
+    # directory and the new "WhisperApp" one would otherwise be the same directory.
+    documents = tmp_path / "Documents"
+    monkeypatch.setattr(audio_recorder, "_documents_dir", lambda: documents)
     monkeypatch.setattr(audio_recorder, "gettempdir", lambda: str(tmp_path))
     return fake
 

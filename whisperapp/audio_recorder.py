@@ -1,4 +1,7 @@
-﻿import logging
+﻿import ctypes
+import logging
+import os
+import shutil
 import threading
 import time
 import uuid
@@ -19,8 +22,156 @@ logger = logging.getLogger(__name__)
 # format (16 kHz mono 16-bit) is 19.2 MB, comfortably inside OpenAI's 25 MB limit.
 MAX_RECORDING_SECONDS = 600.0
 
+# How many finished takes stay on disk. Recordings are the user's own files now that
+# they live in Documents rather than %TEMP%, so the old ten was needlessly stingy:
+# twenty-five covers "yesterday's dictation came out wrong, find me that take" and still
+# caps the folder well under the size a single stuck recording used to reach.
+MAX_RETAINED_RECORDINGS = 25
+
 # How long to wait for the capture thread to notice the stop flag and exit.
 _THREAD_JOIN_TIMEOUT_SECONDS = 1.5
+
+# Where takes are kept, relative to the user's Documents folder.
+_RECORDINGS_SUBPATH = ("WhisperApp", "recordings")
+
+# FOLDERID_Documents. Passed to SHGetKnownFolderPath, which is the only call that
+# reports where Documents *currently* is: OneDrive's "back up your folders" redirects it
+# out from under the profile, so Path.home() / "Documents" silently writes to a stale
+# folder the user never looks at.
+# https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath
+_FOLDERID_DOCUMENTS = "{FDD39AD0-238F-46AF-ADB4-6C85480369C7}"
+
+
+def _documents_dir_via_known_folder() -> Optional[Path]:
+    """Resolve Documents through the shell's known-folder API. ``None`` if unavailable."""
+    if os.name != "nt":
+        return None
+
+    try:
+        from ctypes import wintypes
+
+        class _GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+
+        guid = _GUID()
+        # Parsing the canonical GUID text beats spelling its byte order out by hand.
+        if ctypes.windll.ole32.CLSIDFromString(
+            ctypes.c_wchar_p(_FOLDERID_DOCUMENTS), ctypes.byref(guid)
+        ) != 0:
+            return None
+
+        buffer = ctypes.c_wchar_p()
+        if ctypes.windll.shell32.SHGetKnownFolderPath(
+            ctypes.byref(guid), 0, None, ctypes.byref(buffer)
+        ) != 0:
+            return None
+        try:
+            return Path(buffer.value) if buffer.value else None
+        finally:
+            # The shell allocated that string; leaking it every launch is still a leak.
+            ctypes.windll.ole32.CoTaskMemFree(buffer)
+    except Exception:
+        logger.debug("SHGetKnownFolderPath lookup failed", exc_info=True)
+        return None
+
+
+def _documents_dir_via_registry() -> Optional[Path]:
+    """Fall back to the shell-folders registry value, which records the same redirect."""
+    if os.name != "nt":
+        return None
+
+    try:
+        import winreg
+
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            value, _kind = winreg.QueryValueEx(key, "Personal")
+        # The value is REG_EXPAND_SZ - it usually still contains %USERPROFILE%.
+        expanded = os.path.expandvars(str(value)).strip()
+        return Path(expanded) if expanded else None
+    except Exception:
+        logger.debug("User Shell Folders lookup failed", exc_info=True)
+        return None
+
+
+def _documents_dir() -> Optional[Path]:
+    """The user's Documents folder, honouring OneDrive/known-folder redirection."""
+    for resolve in (_documents_dir_via_known_folder, _documents_dir_via_registry):
+        documents = resolve()
+        if documents is not None:
+            return documents
+    return None
+
+
+def _resolve_recordings_dir() -> Path:
+    """Where takes should be written. Never raises; the directory may not exist yet."""
+    documents = _documents_dir()
+    if documents is None:
+        # Non-Windows, or a machine that answered neither lookup. The home-relative
+        # guess is wrong under a redirect, which is exactly why it is the last resort.
+        documents = Path.home() / "Documents"
+    return documents.joinpath(*_RECORDINGS_SUBPATH)
+
+
+def _legacy_recordings_dir() -> Path:
+    """Where takes lived before they moved to Documents.
+
+    Still the log directory (see ``main.LOG_DIR``), so it is emptied of recordings only.
+    """
+    return Path(gettempdir()) / "whisperapp"
+
+
+def _prepare_recordings_dir() -> Path:
+    """Create the recordings directory, falling back to the old temp one if we cannot."""
+    directory = _resolve_recordings_dir()
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+    except OSError:
+        # A Documents folder that cannot be written to - locked-down profile, or a
+        # OneDrive redirect pointing somewhere currently offline - must not cost the
+        # user the ability to record at all.
+        logger.warning(
+            "Could not create %s; falling back to the temp directory", directory, exc_info=True
+        )
+
+    directory = _legacy_recordings_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _migrate_legacy_recordings(destination: Path) -> None:
+    """Move takes left behind in %TEMP%\\whisperapp into *destination*, once.
+
+    Best effort throughout: a take that cannot be moved stays where it is and the app
+    still starts, and a name collision is always resolved in favour of the file already
+    at the destination rather than by overwriting it.
+    """
+    source = _legacy_recordings_dir()
+    if source == destination or not source.is_dir():
+        return
+
+    for old in source.glob("recording_*.wav"):
+        target = destination / old.name
+        if target.exists():
+            continue
+        try:
+            # move() keeps the modification time, which the retention prune sorts on.
+            shutil.move(str(old), str(target))
+        except OSError:
+            logger.warning("Could not move %s to %s", old, target, exc_info=True)
+
+    try:
+        if not any(source.iterdir()):
+            source.rmdir()
+    except OSError:
+        # Usually just the log file still sitting there. Nothing to do about it.
+        logger.debug("Leaving %s in place", source, exc_info=True)
 
 
 class AudioRecorder:
@@ -52,9 +203,21 @@ class AudioRecorder:
         self._hit_duration_limit = False
         self._finalized_path: Optional[Path] = None
 
-        self.temp_dir = Path(gettempdir()) / "whisperapp"
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self.recordings_dir = _prepare_recordings_dir()
         self.output_path: Optional[Path] = None
+
+        # Before any pruning, so takes rescued out of %TEMP% are counted as kept files
+        # rather than deleted the moment they arrive.
+        try:
+            _migrate_legacy_recordings(self.recordings_dir)
+        except Exception:
+            # Nothing about moving old files is worth failing construction over.
+            logger.warning("Migrating old recordings failed", exc_info=True)
+
+    @property
+    def temp_dir(self) -> Path:
+        """Deprecated alias for :attr:`recordings_dir`, kept for existing callers."""
+        return self.recordings_dir
 
     @property
     def is_recording(self) -> bool:
@@ -95,14 +258,30 @@ class AudioRecorder:
         # Fall back to default if no match.
         return None
 
-    def _cleanup_old_recordings(self, keep: int = 10) -> None:
-        """Remove oldest WAV files in the temp directory, keeping *keep* most recent."""
-        wav_files = sorted(
-            self.temp_dir.glob("*.wav"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        for old in wav_files[keep:]:
+    def _cleanup_old_recordings(self, keep: Optional[int] = None) -> None:
+        """Remove the oldest WAVs in the recordings directory, keeping *keep* of them.
+
+        The take currently being recorded is never a deletion candidate. It cannot be
+        trusted to sort as the newest file: its WAV does not exist for most of the take,
+        and when it is finally written its modification time is still older than any
+        recording the user copied or touched in the meantime.
+        """
+        if keep is None:
+            keep = MAX_RETAINED_RECORDINGS
+
+        in_flight = self.output_path
+        others = [p for p in self.recordings_dir.glob("*.wav") if p != in_flight]
+        try:
+            others.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            # A file vanished mid-scan; the next take will prune it.
+            logger.debug("Could not sort %s for pruning", self.recordings_dir, exc_info=True)
+            return
+
+        # The in-flight take counts against the retention budget once it is on disk,
+        # so the folder settles at exactly *keep* files rather than one over.
+        limit = keep - 1 if in_flight is not None and in_flight.exists() else keep
+        for old in others[max(limit, 0):]:
             try:
                 old.unlink()
             except OSError:
@@ -117,7 +296,10 @@ class AudioRecorder:
             self._stop_event.clear()
             self._hit_duration_limit = False
             self._finalized_path = None
-            self.output_path = self.temp_dir / f"recording_{uuid.uuid4().hex}.wav"
+            self.output_path = self.recordings_dir / f"recording_{uuid.uuid4().hex}.wav"
+            # Trim on the way in as well as on the way out: a crash or a kill between
+            # the two used to leave the folder growing with nothing ever pruning it.
+            self._cleanup_old_recordings()
 
             device_index = self._resolve_input_device_index()
             self._stream = self._pyaudio.open(
