@@ -246,3 +246,35 @@ def test_key_check_reports_auth_failure(fake_openai, auth_error):
 
     assert result.ok is False
     assert result.error_kind is svc.TranscriptionErrorKind.AUTH_FAILED
+
+
+@pytest.mark.parametrize("language", ["en", "fr", ""])
+def test_gpt_transcribe_uses_plural_language_hints(service, fake_openai, wav_path, language):
+    fake_openai.audio.transcriptions.create.return_value = transcript("  Bonjour  ")
+    result = service.transcribe(wav_path, "gpt-transcribe", language)
+    request = fake_openai.audio.transcriptions.create.call_args.kwargs
+    assert request["model"] == "gpt-transcribe"
+    assert "language" not in request
+    if language:
+        assert request["extra_body"] == {"languages": [language]}
+    else:
+        assert "extra_body" not in request
+    assert result.text == "Bonjour"
+
+
+def test_legacy_fallback_keeps_its_request_contract(service, fake_openai, wav_path):
+    service.transcribe(wav_path, "whisper-1", "en")
+    request = fake_openai.audio.transcriptions.create.call_args.kwargs
+    assert request["language"] == "en"
+    assert "extra_body" not in request
+
+
+@pytest.mark.parametrize("model", ["gpt-transcribe", "whisper-1"])
+def test_key_check_probes_selected_model(fake_openai, model):
+    svc.TranscriptionService().test_api_key("sk-test-key", model=model)
+    assert fake_openai.audio.transcriptions.create.call_args.kwargs["model"] == model
+
+
+def test_key_check_defaults_to_new_model(fake_openai):
+    svc.TranscriptionService().test_api_key("sk-test-key")
+    assert fake_openai.audio.transcriptions.create.call_args.kwargs["model"] == "gpt-transcribe"

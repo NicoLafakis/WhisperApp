@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
 )
 
 from whisperapp.audio_recorder import AudioRecorder
+from whisperapp.config_manager import DEFAULT_TRANSCRIPTION_MODEL
 from whisperapp.transcription_service import (
     BILLING_URL,
     ERROR_HEADLINES,
@@ -64,8 +65,15 @@ class SettingsDialog(QDialog):
         self.api_key_input.setPlaceholderText("sk-...")
 
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["whisper-1"])
-        self.model_combo.setCurrentText(str(settings.get("model", "whisper-1")))
+        self.model_combo.addItems([DEFAULT_TRANSCRIPTION_MODEL, "whisper-1"])
+        current_model = str(settings.get("model", DEFAULT_TRANSCRIPTION_MODEL))
+        if self.model_combo.findText(current_model) < 0:
+            self.model_combo.addItem(current_model)
+        self.model_combo.setCurrentText(current_model)
+        self.model_combo.setToolTip(
+            "GPT Transcribe is recommended for dictation. "
+            "Whisper is a legacy fallback scheduled to retire February 26, 2027."
+        )
 
         self.language_combo = QComboBox()
         for label, value in LANGUAGE_OPTIONS:
@@ -144,7 +152,7 @@ class SettingsDialog(QDialog):
         self.test_button.setText("Testing...")
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            result = self._service.test_api_key(api_key)
+            result = self._service.test_api_key(api_key, model=self.model_combo.currentText())
         finally:
             QApplication.restoreOverrideCursor()
             self.test_button.setEnabled(True)

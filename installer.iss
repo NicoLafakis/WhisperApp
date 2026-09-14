@@ -6,23 +6,42 @@
 #define MyAppVersion "1.1.0"
 #define MyAppPublisher "WhisperApp"
 #define MyAppExeName "WhisperApp.exe"
+#define MyAppMutex "WhisperApp-SingleInstance-0f6b1c94b7d24e0a,Local\WhisperApp-SingleInstance-0f6b1c94b7d24e0a"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppPublisherURL=https://github.com/NicoLafakis/WhisperApp
+AppSupportURL=https://github.com/NicoLafakis/WhisperApp
+AppUpdatesURL=https://github.com/NicoLafakis/WhisperApp
 DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
 LicenseFile=LICENSE.txt
 OutputDir=installer
 OutputBaseFilename=WhisperApp-Setup-{#MyAppVersion}
 SetupIconFile=assets\icon.ico
-Compression=lzma
+Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+MinVersion=10.0
+
+; Windows VersionInfo metadata (avoids generic or empty PE headers flagged by AV heuristics)
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} Setup
+VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
+
+; Native Windows process management via Mutex and WM_CLOSE (avoids forced external process termination scripts)
+AppMutex={#MyAppMutex}
+CloseApplications=yes
+CloseApplicationsFilter=*.exe
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -43,8 +62,6 @@ Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: st
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-Filename: "{cmd}"; Parameters: "/C taskkill /IM {#MyAppExeName} /F"; Flags: runhidden; RunOnceId: "StopWhisperApp"
-
 [UninstallDelete]
 Type: filesandordirs; Name: "{userappdata}\.whisperapp"
+

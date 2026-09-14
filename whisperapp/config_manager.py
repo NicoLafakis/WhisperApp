@@ -6,9 +6,12 @@ from typing import Any, Dict
 from cryptography.fernet import Fernet, InvalidToken
 
 
+DEFAULT_TRANSCRIPTION_MODEL = "gpt-transcribe"
+
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "api_key": "",
-    "model": "whisper-1",
+    "model": DEFAULT_TRANSCRIPTION_MODEL,
+    "transcription_model_migration": 1,
     "language": "en",
     "hotkey": "ctrl+shift+space",
     "auto_copy": True,
@@ -44,6 +47,12 @@ class ConfigManager:
             data = json.loads(self.config_path.read_text(encoding="utf-8"))
             settings = dict(DEFAULT_SETTINGS)
             settings.update(data)
+            # Migrate the old default once; a later explicit fallback choice survives.
+            if not data.get("transcription_model_migration"):
+                if settings.get("model") == "whisper-1":
+                    settings["model"] = DEFAULT_TRANSCRIPTION_MODEL
+                settings["transcription_model_migration"] = 1
+                self._write_settings(settings)
             return settings
         except (json.JSONDecodeError, OSError):
             settings = dict(DEFAULT_SETTINGS)

@@ -13,6 +13,8 @@ import httpx
 import openai
 from openai import OpenAI
 
+from whisperapp.config_manager import DEFAULT_TRANSCRIPTION_MODEL
+
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +31,7 @@ QUOTA_ERROR_TYPES = frozenset({"insufficient_quota"})
 QUOTA_ERROR_CODES = frozenset({"insufficient_quota", "credit_balance_exhausted"})
 
 # The key check uploads this much synthetic audio. OpenAI rejects clips under 0.1s.
-PROBE_MODEL = "whisper-1"
+PROBE_MODEL = DEFAULT_TRANSCRIPTION_MODEL
 PROBE_FILENAME = "whisperapp-key-check.wav"
 PROBE_SAMPLE_RATE = 16000
 PROBE_DURATION_SECONDS = 0.25
@@ -162,7 +164,7 @@ class TranscriptionService:
 
         self._client = OpenAI(api_key=api_key, http_client=self._build_http_client())
 
-    def test_api_key(self, api_key: str) -> TranscriptionResult:
+    def test_api_key(self, api_key: str, model: str = PROBE_MODEL) -> TranscriptionResult:
         """Check that *api_key* can transcribe, not merely that it authenticates.
 
         Deliberately *not* ``models.list()``: that endpoint is not quota-gated and
@@ -189,7 +191,7 @@ class TranscriptionService:
                 max_retries=0,
             )
             client.audio.transcriptions.create(
-                model=PROBE_MODEL,
+                model=model,
                 file=(PROBE_FILENAME, _probe_clip_bytes(), "audio/wav"),
             )
         except Exception as exc:
@@ -217,7 +219,12 @@ class TranscriptionService:
                     "file": audio_file,
                 }
                 if language:
-                    kwargs["language"] = language
+                    if model == DEFAULT_TRANSCRIPTION_MODEL:
+                        # The new API uses plural language hints. extra_body also
+                        # works with SDKs predating the new typed fields.
+                        kwargs["extra_body"] = {"languages": [language]}
+                    else:
+                        kwargs["language"] = language
                 transcript = self._client.audio.transcriptions.create(**kwargs)
         except Exception as exc:
             kind, message = classify_error(exc)

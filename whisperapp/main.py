@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
 )
 
 from whisperapp.audio_recorder import AudioRecorder
-from whisperapp.config_manager import ConfigManager
+from whisperapp.config_manager import ConfigManager, DEFAULT_TRANSCRIPTION_MODEL
 from whisperapp.hotkey_listener import HotkeyListener
 from whisperapp.settings_dialog import SettingsDialog
 from whisperapp.text_inserter import TextInserter
@@ -578,7 +578,7 @@ class WhisperTrayApp(QObject):
         self._worker_thread = TranscriptionThread(
             service=self.transcription_service,
             wav_path=wav_path,
-            model=str(self.settings.get("model", "whisper-1")),
+            model=str(self.settings.get("model", DEFAULT_TRANSCRIPTION_MODEL)),
             language=str(self.settings.get("language", "en")),
         )
         self._worker_thread.completed.connect(self._on_transcription_finished)
