@@ -17,6 +17,7 @@ from pathlib import Path
 
 import openai
 import pytest
+import httpx
 
 from tests.conftest import QUOTA_MESSAGE, openai_error, transcript
 from whisperapp import transcription_service as svc
@@ -134,6 +135,16 @@ def test_unexpected_failure_is_classified_as_unknown(service, fake_openai, wav_p
 
     assert result.ok is False
     assert result.error_kind is svc.TranscriptionErrorKind.UNKNOWN
+
+
+@pytest.mark.parametrize("error_type", [openai.APIConnectionError, openai.APITimeoutError])
+def test_network_failure_has_actionable_retry_message(service, fake_openai, wav_path, error_type):
+    fake_openai.audio.transcriptions.create.side_effect = error_type(
+        request=httpx.Request("POST", "https://api.openai.com/v1/audio/transcriptions")
+    )
+    result = service.transcribe(wav_path, "gpt-transcribe", "en")
+    assert result.error_kind is svc.TranscriptionErrorKind.CONNECTION_FAILED
+    assert "Retry Last Recording" in result.message
 
 
 def test_unconfigured_service_is_classified_not_configured(fake_openai, wav_path):

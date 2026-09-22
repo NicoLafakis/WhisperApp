@@ -142,3 +142,29 @@ def test_recorder_under_the_cap_is_unaffected(make_recorder):
     assert recorder.hit_duration_limit is False
     assert path is not None
     assert _frame_count(path) > 0
+
+
+def test_stale_audio_device_is_refreshed_and_recording_retried(make_recorder, fake_pyaudio, monkeypatch):
+    from unittest.mock import MagicMock
+    recorder = make_recorder()
+    original_open = fake_pyaudio.instance.open
+    opened = MagicMock(side_effect=[OSError(-9999, "Unanticipated host error"), original_open()])
+    monkeypatch.setattr(fake_pyaudio.instance, "open", opened)
+    recorder.start_recording()
+    time.sleep(0.02)
+    assert recorder.stop_recording() is not None
+    assert opened.call_count == 2
+    assert fake_pyaudio.instance.terminated
+
+
+def test_capture_read_failure_notifies_controller(make_recorder, fake_pyaudio, monkeypatch):
+    from unittest.mock import MagicMock
+    stream = fake_pyaudio.instance.open()
+    stream.read = MagicMock(side_effect=OSError("device disconnected"))
+    monkeypatch.setattr(fake_pyaudio.instance, "open", lambda **kwargs: stream)
+    errors = []
+    recorder = make_recorder(on_capture_error=errors.append)
+    recorder.start_recording()
+    assert _wait_until(lambda: bool(errors))
+    assert "capture stopped" in errors[0]
+    assert recorder.stop_recording() is None

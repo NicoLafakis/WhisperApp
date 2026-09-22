@@ -45,6 +45,7 @@ class TranscriptionErrorKind(Enum):
     RATE_LIMITED = "rate_limited"
     AUTH_FAILED = "auth_failed"
     FILE_TOO_LARGE = "file_too_large"
+    CONNECTION_FAILED = "connection_failed"
     UNKNOWN = "unknown"
 
 
@@ -55,6 +56,7 @@ ERROR_HEADLINES: Dict[TranscriptionErrorKind, str] = {
     TranscriptionErrorKind.RATE_LIMITED: "Rate Limited",
     TranscriptionErrorKind.AUTH_FAILED: "API Key Rejected",
     TranscriptionErrorKind.FILE_TOO_LARGE: "Recording Too Long",
+    TranscriptionErrorKind.CONNECTION_FAILED: "Connection Failed",
     TranscriptionErrorKind.UNKNOWN: "Transcription Failed",
 }
 
@@ -65,6 +67,7 @@ ERROR_STATUSES: Dict[TranscriptionErrorKind, str] = {
     TranscriptionErrorKind.RATE_LIMITED: "Failed: rate limited, retry shortly",
     TranscriptionErrorKind.AUTH_FAILED: "Failed: API key rejected",
     TranscriptionErrorKind.FILE_TOO_LARGE: "Failed: recording too long",
+    TranscriptionErrorKind.CONNECTION_FAILED: "Failed: connection lost — retry recording",
     TranscriptionErrorKind.UNKNOWN: "Failed: see log",
 }
 
@@ -104,6 +107,12 @@ def api_message(exc: Exception) -> str:
 def classify_error(exc: Exception) -> Tuple[TranscriptionErrorKind, str]:
     """Map an exception from the OpenAI SDK onto an actionable failure kind."""
     message = api_message(exc)
+
+    if isinstance(exc, openai.APIConnectionError):
+        return TranscriptionErrorKind.CONNECTION_FAILED, (
+            "Could not reach OpenAI. Check your internet connection, then choose "
+            "Retry Last Recording from the tray menu. Your audio is saved locally."
+        )
 
     if not isinstance(exc, openai.APIStatusError):
         return TranscriptionErrorKind.UNKNOWN, message
@@ -228,7 +237,7 @@ class TranscriptionService:
                 transcript = self._client.audio.transcriptions.create(**kwargs)
         except Exception as exc:
             kind, message = classify_error(exc)
-            logger.error("Transcription failed (%s): %s", kind.name, message)
+            logger.error("Transcription failed (%s): %s", kind.name, message, exc_info=True)
             return TranscriptionResult(error_kind=kind, message=message)
 
         return TranscriptionResult(text=(getattr(transcript, "text", "") or "").strip())

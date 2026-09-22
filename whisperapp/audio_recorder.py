@@ -183,6 +183,7 @@ class AudioRecorder:
         audio_device: Optional[str] = None,
         max_duration_seconds: float = MAX_RECORDING_SECONDS,
         on_max_duration_reached: Optional[Callable[[Optional[Path]], None]] = None,
+        on_capture_error: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
@@ -191,6 +192,7 @@ class AudioRecorder:
         self.audio_device = audio_device
         self.max_duration_seconds = max_duration_seconds
         self.on_max_duration_reached = on_max_duration_reached
+        self.on_capture_error = on_capture_error
 
         self._pyaudio = pyaudio.PyAudio()
         self._stream = None
@@ -301,17 +303,27 @@ class AudioRecorder:
             # the two used to leave the folder growing with nothing ever pruning it.
             self._cleanup_old_recordings()
 
-            device_index = self._resolve_input_device_index()
-            self._stream = self._pyaudio.open(
-                format=self.audio_format,
-                channels=self.channels,
-                rate=self.sample_rate,
-                input=True,
-                input_device_index=device_index,
-                frames_per_buffer=self.chunk_size,
-            )
+            try:
+                self._open_input_stream()
+            except OSError:
+                # PortAudio's device list can become stale after sleep or USB changes.
+                logger.warning("Microphone open failed; refreshing audio devices", exc_info=True)
+                self._pyaudio.terminate()
+                self._pyaudio = pyaudio.PyAudio()
+                self._open_input_stream()
             self._recording_thread = threading.Thread(target=self._record, daemon=True)
             self._recording_thread.start()
+            logger.info("Recording started: %s", self.output_path.name)
+
+    def _open_input_stream(self) -> None:
+        self._stream = self._pyaudio.open(
+            format=self.audio_format,
+            channels=self.channels,
+            rate=self.sample_rate,
+            input=True,
+            input_device_index=self._resolve_input_device_index(),
+            frames_per_buffer=self.chunk_size,
+        )
 
     def _record(self) -> None:
         deadline: Optional[float] = None
@@ -326,7 +338,9 @@ class AudioRecorder:
                 self._update_volume_level(data)
             except Exception:
                 # Device unplugged or stream closed under us: end the take, keep frames.
-                logger.debug("Input stream read failed; ending capture", exc_info=True)
+                logger.warning("Input stream read failed; ending capture", exc_info=True)
+                if self.on_capture_error is not None:
+                    self.on_capture_error("Audio capture stopped unexpectedly. Any captured audio will be transcribed. Check your microphone before the next recording.")
                 break
             if deadline is not None and time.monotonic() >= deadline:
                 reached_limit = True
@@ -432,6 +446,7 @@ class AudioRecorder:
 
         self._cleanup_old_recordings()
         self._finalized_path = path
+        logger.info("Recording saved: %s (%d frames)", path.name, sum(len(chunk) for chunk in frames) // (2 * self.channels))
         return path
 
     def stop_recording(self) -> Optional[Path]:
