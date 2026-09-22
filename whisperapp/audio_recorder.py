@@ -13,6 +13,8 @@ from typing import Callable, List, Optional
 
 import pyaudio
 
+from whisperapp.dictation_store import DictationStore
+
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +168,20 @@ def _migrate_legacy_recordings(destination: Path) -> None:
         except OSError:
             logger.warning("Could not move %s to %s", old, target, exc_info=True)
 
+    # Migrate journals and text as well, including text whose completed WAV was
+    # already pruned. Also finishes a move interrupted after moving only the WAV.
+    for pattern in ("recording_*.txt", "recording_*.json"):
+        for old in source.glob(pattern):
+            target = destination / old.name
+            if old.with_suffix(".wav").exists() or target.exists():
+                # A WAV still at the source means its move failed or collided. Keep
+                # its companions together rather than attach them to different audio.
+                continue
+            try:
+                shutil.move(str(old), target)
+            except OSError:
+                logger.warning("Could not migrate recording companion %s", old, exc_info=True)
+
     try:
         if not any(source.iterdir()):
             source.rmdir()
@@ -204,6 +220,8 @@ class AudioRecorder:
         self._volume_level = 0.0
         self._hit_duration_limit = False
         self._finalized_path: Optional[Path] = None
+        self._wav_writer = None
+        self._wav_file = None
 
         self.recordings_dir = _prepare_recordings_dir()
         self.output_path: Optional[Path] = None
@@ -272,7 +290,11 @@ class AudioRecorder:
             keep = MAX_RETAINED_RECORDINGS
 
         in_flight = self.output_path
-        others = [p for p in self.recordings_dir.glob("*.wav") if p != in_flight]
+        store = DictationStore(self.recordings_dir)
+        # Unknown legacy takes may be the user's missing dictation. Never guess that
+        # they succeeded. Only completed audio is disposable; transcripts stay.
+        others = [p for p in self.recordings_dir.glob("*.wav")
+                  if p != in_flight and store.read(p)["state"] == "completed"]
         try:
             others.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         except OSError:
@@ -292,7 +314,14 @@ class AudioRecorder:
     def start_recording(self) -> None:
         with self._lock:
             if self._stream is not None:
-                return
+                if self._stop_event.is_set():
+                    if self._recording_thread is not None and self._recording_thread.is_alive():
+                        raise OSError("The microphone is still stopping. Your audio is saved; try again shortly.")
+                    self._finalize_locked()
+                else:
+                    return
+            if self._wav_writer is not None:
+                self._close_wav()
             self._frames = []
             self._set_volume_level(0.0)
             self._stop_event.clear()
@@ -303,14 +332,30 @@ class AudioRecorder:
             # the two used to leave the folder growing with nothing ever pruning it.
             self._cleanup_old_recordings()
 
+            # Create a readable WAV before recording starts. writeframes patches the
+            # header on each chunk; flush + fsync commits each captured chunk to disk.
+            self._wav_file = self.output_path.open("w+b")
+            self._wav_writer = wave.open(self._wav_file, "wb")
+            self._wav_writer.setnchannels(self.channels)
+            self._wav_writer.setsampwidth(self._pyaudio.get_sample_size(self.audio_format))
+            self._wav_writer.setframerate(self.sample_rate)
+            self._wav_writer.writeframes(b"")
+            self._wav_file.flush()
+            DictationStore(self.recordings_dir).update(self.output_path, state="recording")
+
             try:
-                self._open_input_stream()
-            except OSError:
-                # PortAudio's device list can become stale after sleep or USB changes.
-                logger.warning("Microphone open failed; refreshing audio devices", exc_info=True)
-                self._pyaudio.terminate()
-                self._pyaudio = pyaudio.PyAudio()
-                self._open_input_stream()
+                try:
+                    self._open_input_stream()
+                except OSError:
+                    # PortAudio's device list can become stale after sleep or USB changes.
+                    logger.warning("Microphone open failed; refreshing audio devices", exc_info=True)
+                    self._pyaudio.terminate()
+                    self._pyaudio = pyaudio.PyAudio()
+                    self._open_input_stream()
+            except Exception:
+                self._close_wav()
+                DictationStore(self.recordings_dir).update(self.output_path, state="failed", error="Microphone could not be opened")
+                raise
             self._recording_thread = threading.Thread(target=self._record, daemon=True)
             self._recording_thread.start()
             logger.info("Recording started: %s", self.output_path.name)
@@ -335,12 +380,15 @@ class AudioRecorder:
             try:
                 data = self._stream.read(self.chunk_size, exception_on_overflow=False)
                 self._frames.append(data)
+                self._wav_writer.writeframes(data)
+                self._wav_file.flush()
+                os.fsync(self._wav_file.fileno())
                 self._update_volume_level(data)
             except Exception:
                 # Device unplugged or stream closed under us: end the take, keep frames.
-                logger.warning("Input stream read failed; ending capture", exc_info=True)
+                logger.warning("Audio capture or save failed; ending capture", exc_info=True)
                 if self.on_capture_error is not None:
-                    self.on_capture_error("Audio capture stopped unexpectedly. Any captured audio will be transcribed. Check your microphone before the next recording.")
+                    self.on_capture_error("Audio capture stopped unexpectedly. Saved audio remains in Dictation History and will be transcribed.")
                 break
             if deadline is not None and time.monotonic() >= deadline:
                 reached_limit = True
@@ -414,6 +462,18 @@ class AudioRecorder:
         if thread is None or thread is threading.current_thread():
             return
         thread.join(timeout=_THREAD_JOIN_TIMEOUT_SECONDS)
+        if thread.is_alive():
+            raise OSError("The microphone did not stop in time. Captured audio remains saved on disk.")
+
+    def _close_wav(self) -> None:
+        try:
+            if self._wav_writer is not None:
+                self._wav_writer.close()
+        finally:
+            self._wav_writer = None
+            if self._wav_file is not None:
+                self._wav_file.close()
+                self._wav_file = None
 
     def _finalize_locked(self) -> Optional[Path]:
         """Close the stream and write the WAV. Caller must hold ``self._lock``."""
@@ -430,19 +490,17 @@ class AudioRecorder:
             logger.debug("Closing the input stream failed", exc_info=True)
         self._stream = None
         self._set_volume_level(0.0)
+        self._close_wav()
 
         frames = self._frames
         self._frames = []
         if not frames:
+            DictationStore(self.recordings_dir).update(self.output_path, state="failed", error="No audio captured")
             self._finalized_path = None
             return None
 
         path = self.output_path
-        with wave.open(str(path), "wb") as wf:
-            wf.setnchannels(self.channels)
-            wf.setsampwidth(self._pyaudio.get_sample_size(self.audio_format))
-            wf.setframerate(self.sample_rate)
-            wf.writeframes(b"".join(frames))
+        DictationStore(self.recordings_dir).update(path, state="pending")
 
         self._cleanup_old_recordings()
         self._finalized_path = path
@@ -464,8 +522,7 @@ class AudioRecorder:
         with self._lock:
             if self._stream is not None:
                 try:
-                    self._stream.stop_stream()
-                    self._stream.close()
+                    self._finalize_locked()
                 except Exception:
                     # Shutdown path: a stream that will not close is not worth crashing on.
                     logger.debug("Closing the input stream failed", exc_info=True)

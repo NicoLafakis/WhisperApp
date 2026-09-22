@@ -46,6 +46,7 @@ class TranscriptionErrorKind(Enum):
     AUTH_FAILED = "auth_failed"
     FILE_TOO_LARGE = "file_too_large"
     CONNECTION_FAILED = "connection_failed"
+    SERVICE_UNAVAILABLE = "service_unavailable"
     UNKNOWN = "unknown"
 
 
@@ -57,6 +58,7 @@ ERROR_HEADLINES: Dict[TranscriptionErrorKind, str] = {
     TranscriptionErrorKind.AUTH_FAILED: "API Key Rejected",
     TranscriptionErrorKind.FILE_TOO_LARGE: "Recording Too Long",
     TranscriptionErrorKind.CONNECTION_FAILED: "Connection Failed",
+    TranscriptionErrorKind.SERVICE_UNAVAILABLE: "Transcription Service Unavailable",
     TranscriptionErrorKind.UNKNOWN: "Transcription Failed",
 }
 
@@ -68,6 +70,7 @@ ERROR_STATUSES: Dict[TranscriptionErrorKind, str] = {
     TranscriptionErrorKind.AUTH_FAILED: "Failed: API key rejected",
     TranscriptionErrorKind.FILE_TOO_LARGE: "Failed: recording too long",
     TranscriptionErrorKind.CONNECTION_FAILED: "Failed: connection lost — retry recording",
+    TranscriptionErrorKind.SERVICE_UNAVAILABLE: "Audio saved — service unavailable",
     TranscriptionErrorKind.UNKNOWN: "Failed: see log",
 }
 
@@ -110,14 +113,16 @@ def classify_error(exc: Exception) -> Tuple[TranscriptionErrorKind, str]:
 
     if isinstance(exc, openai.APIConnectionError):
         return TranscriptionErrorKind.CONNECTION_FAILED, (
-            "Could not reach OpenAI. Check your internet connection, then choose "
-            "Retry Last Recording from the tray menu. Your audio is saved locally."
+            "Could not reach OpenAI. Recordings are saved locally and temporary "
+            "connection failures are retried automatically. Open Dictation History to recover audio or text."
         )
 
     if not isinstance(exc, openai.APIStatusError):
         return TranscriptionErrorKind.UNKNOWN, message
 
     status_code = exc.status_code
+    if status_code >= 500:
+        return TranscriptionErrorKind.SERVICE_UNAVAILABLE, message
     if status_code == 401:
         return TranscriptionErrorKind.AUTH_FAILED, message
     if status_code == 413:
@@ -171,7 +176,8 @@ class TranscriptionService:
             self._client = None
             return
 
-        self._client = OpenAI(api_key=api_key, http_client=self._build_http_client())
+        # Retry scheduling belongs to the durable queue so it survives restarts.
+        self._client = OpenAI(api_key=api_key, http_client=self._build_http_client(), max_retries=0)
 
     def test_api_key(self, api_key: str, model: str = PROBE_MODEL) -> TranscriptionResult:
         """Check that *api_key* can transcribe, not merely that it authenticates.

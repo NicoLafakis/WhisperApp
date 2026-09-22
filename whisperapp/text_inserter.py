@@ -2,9 +2,19 @@
 
 import keyboard
 import pyperclip
+import ctypes
+import os
 
 
 class TextInserter:
+    @staticmethod
+    def foreground_window():
+        if os.name != "nt":
+            return None
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.GetForegroundWindow.restype = ctypes.c_void_p
+        return user32.GetForegroundWindow()
+
     @staticmethod
     def copy_text(text: str) -> None:
         for attempt in range(3):

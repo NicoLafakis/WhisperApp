@@ -13,9 +13,7 @@ def test_hotkey_thread_to_recording_to_worker_to_output(monkeypatch, tmp_path):
     config = MagicMock()
     config.get_settings.return_value = {"api_key": "test", "model": "gpt-transcribe"}
     recorder = MagicMock()
-    audio = tmp_path / "take.wav"
-    audio.write_bytes(b"recorded audio")
-    recorder.stop_recording.return_value = audio
+    recorder.recordings_dir = tmp_path
     service = MagicMock()
     service.transcribe.return_value = TranscriptionResult(text="Dictation reached the text field")
     inserter = MagicMock()
@@ -32,6 +30,9 @@ def test_hotkey_thread_to_recording_to_worker_to_output(monkeypatch, tmp_path):
 
     try:
         for take in range(3):
+            audio = tmp_path / f"recording_{take}.wav"
+            audio.write_bytes(b"recorded audio")
+            recorder.stop_recording.return_value = audio
             press = threading.Thread(target=callbacks["on_start"])
             press.start()
             press.join()

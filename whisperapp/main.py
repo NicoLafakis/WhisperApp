@@ -2,6 +2,7 @@
 import logging
 import math
 import sys
+import time
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Callable, Optional
@@ -20,6 +21,8 @@ from PyQt5.QtWidgets import (
 
 from whisperapp.audio_recorder import AudioRecorder
 from whisperapp.config_manager import ConfigManager, DEFAULT_TRANSCRIPTION_MODEL
+from whisperapp.dictation_store import DictationStore
+from whisperapp.history_dialog import HistoryDialog
 from whisperapp.hotkey_listener import HotkeyListener
 from whisperapp.settings_dialog import SettingsDialog
 from whisperapp.text_inserter import TextInserter
@@ -140,12 +143,13 @@ class SingleInstanceGuard:
 class TranscriptionThread(QThread):
     completed = pyqtSignal(object)  # TranscriptionResult
 
-    def __init__(self, service: TranscriptionService, wav_path: Path, model: str, language: str):
+    def __init__(self, service: TranscriptionService, wav_path: Path, model: str, language: str, store=None):
         super().__init__()
         self._service = service
         self._wav_path = wav_path
         self._model = model
         self._language = language
+        self._store = store
 
     def run(self) -> None:
         try:
@@ -160,6 +164,13 @@ class TranscriptionThread(QThread):
                 error_kind=TranscriptionErrorKind.UNKNOWN,
                 message=str(exc),
             )
+        # Save text before handing it to the UI. A quit/crash between the API result
+        # and queued Qt callback must not discard a completed transcription.
+        if result.ok and result.text.strip() and self._store is not None:
+            try:
+                self._store.complete(self._wav_path, result.text.strip())
+            except Exception:
+                logging.exception("Could not persist transcription; retaining result for UI recovery")
         self.completed.emit(result)
 
 
@@ -310,7 +321,7 @@ class WhisperTrayApp(QObject):
     max_duration_reached = pyqtSignal(object)  # Optional[Path]
     hotkey_pressed = pyqtSignal()
     hotkey_released = pyqtSignal()
-    capture_failed = pyqtSignal(str)
+    capture_failed = pyqtSignal(object, str)
 
     def __init__(self, app: QApplication):
         super().__init__()
@@ -326,7 +337,7 @@ class WhisperTrayApp(QObject):
         self.audio_recorder = AudioRecorder(
             audio_device=str(self.settings.get("audio_device", "default")),
             on_max_duration_reached=self.max_duration_reached.emit,
-            on_capture_error=self.capture_failed.emit,
+            on_capture_error=lambda message: self.capture_failed.emit(self.audio_recorder.output_path, message),
         )
         self.max_duration_reached.connect(self._on_max_duration_reached)
         self.capture_failed.connect(self._on_capture_error)
@@ -339,6 +350,19 @@ class WhisperTrayApp(QObject):
         self._worker_thread = None
         self._last_recording: Optional[Path] = None
         self._last_text = ""
+        self._active_job_path = None
+        self._paste_targets = {}
+        self._capture_target = None
+        self._history_dialog = None
+        self._closing = False
+        self.store = DictationStore(self.audio_recorder.recordings_dir)
+        self.store.recover()
+        saved = self.store.jobs()
+        if saved:
+            self._last_recording = Path(saved[-1]["path"])
+            completed = [job for job in saved if job["state"] == "completed"]
+            if completed:
+                self._last_text = self.store.text(Path(completed[-1]["path"]))
         # The kind of the failure currently on screen, so a run of identical failures
         # does not stack up a modal dialog per attempt.
         self._last_failure_kind: Optional[TranscriptionErrorKind] = None
@@ -354,11 +378,13 @@ class WhisperTrayApp(QObject):
         self.settings_action.triggered.connect(self.open_settings)
 
         self.retry_action = QAction("Retry Last Recording", self.menu)
-        self.retry_action.setEnabled(False)
+        self.retry_action.setEnabled(self._last_recording is not None)
         self.retry_action.triggered.connect(self.retry_last_recording)
         self.copy_action = QAction("Copy Last Transcription", self.menu)
-        self.copy_action.setEnabled(False)
+        self.copy_action.setEnabled(bool(self._last_text))
         self.copy_action.triggered.connect(self.copy_last_transcription)
+        self.history_action = QAction("Dictation History", self.menu)
+        self.history_action.triggered.connect(self.show_history)
 
         self.about_action = QAction("About", self.menu)
         self.about_action.triggered.connect(self.show_about)
@@ -369,6 +395,7 @@ class WhisperTrayApp(QObject):
         self.menu.addAction(self.status_action)
         self.menu.addAction(self.retry_action)
         self.menu.addAction(self.copy_action)
+        self.menu.addAction(self.history_action)
         self.menu.addSeparator()
         self.menu.addAction(self.settings_action)
         self.menu.addAction(self.about_action)
@@ -405,6 +432,9 @@ class WhisperTrayApp(QObject):
             )
 
         self.app.aboutToQuit.connect(self.cleanup)
+        self._queue_timer = QTimer(self)
+        self._queue_timer.timeout.connect(self._process_queue)
+        self._queue_timer.start(1000)
 
         self.notify(
             "WhisperApp Started",
@@ -530,10 +560,14 @@ class WhisperTrayApp(QObject):
         self.notify("Settings Updated", "Your settings have been saved.")
 
     def on_hotkey_pressed(self) -> None:
-        if self._is_recording or self._is_transcribing:
+        if self._is_recording or self._closing:
             return
 
         try:
+            self._capture_target = self.text_inserter.foreground_window()
+            # A new dictation supersedes the paste destination of older queued
+            # work; that text remains in history instead of arriving out of order.
+            self._paste_targets.clear()
             self.audio_recorder.start_recording()
             self._is_recording = True
             self.retry_action.setEnabled(False)
@@ -550,11 +584,11 @@ class WhisperTrayApp(QObject):
             self.set_status("Failed: microphone unavailable")
             self.notify("Recording Error", str(exc))
 
-    def _on_capture_error(self, message: str) -> None:
-        if not self._is_recording:
+    def _on_capture_error(self, path, message: str) -> None:
+        if not self._is_recording or path != self.audio_recorder.output_path:
             return
         self.on_hotkey_released()
-        self.notify("Microphone Disconnected", message, QSystemTrayIcon.Warning)
+        self.notify("Recording Interrupted", message, QSystemTrayIcon.Warning)
 
     def on_hotkey_released(self) -> None:
         if not self._is_recording:
@@ -562,20 +596,17 @@ class WhisperTrayApp(QObject):
 
         self._is_recording = False
         self.recording_indicator.hide_indicator()
-        self.set_status("Transcribing...")
-        self._is_transcribing = True
+        self.set_status("Saving recording...")
 
         try:
             wav_path = self.audio_recorder.stop_recording()
         except Exception as exc:
             logging.exception("Recording stop failed")
-            self._is_transcribing = False
             self.retry_action.setEnabled(self._last_recording is not None)
             self.set_status("Failed: recording could not be saved")
             self.notify("Recording Error", str(exc), QSystemTrayIcon.Critical)
             return
         if wav_path is None:
-            self._is_transcribing = False
             self.retry_action.setEnabled(self._last_recording is not None)
             self.set_status("Ready")
             self.notify("No Audio Recorded", "No audio captured for transcription.")
@@ -606,8 +637,6 @@ class WhisperTrayApp(QObject):
             self.set_status("Ready")
             return
 
-        self.set_status("Transcribing...")
-        self._is_transcribing = True
         self._start_transcription(wav_path)
 
     def retry_last_recording(self) -> None:
@@ -618,42 +647,120 @@ class WhisperTrayApp(QObject):
             self.retry_action.setEnabled(False)
             self.notify("Recording Unavailable", "The saved recording no longer exists.")
             return
-        self._start_transcription(self._last_recording)
+        self.retry_recording(str(self._last_recording))
+
+    def show_history(self) -> None:
+        if self._history_dialog is None:
+            self._history_dialog = HistoryDialog(self.store)
+            self._history_dialog.retry_requested.connect(self.retry_recording)
+        self._history_dialog.refresh()
+        self._history_dialog.show()
+        self._history_dialog.raise_()
+        self._history_dialog.activateWindow()
+
+    def retry_recording(self, path: str) -> None:
+        wav_path = Path(path)
+        if wav_path == self._active_job_path or not wav_path.is_file():
+            return
+        if self.store.text(wav_path):
+            self.show_history()
+            return
+        self._paste_targets.pop(path, None)
+        self._enqueue(wav_path)
 
     def _start_transcription(self, wav_path: Path) -> None:
         self._last_recording = wav_path
-        self.retry_action.setEnabled(False)
+        self._paste_targets[str(wav_path)] = self._capture_target
+        self._enqueue(wav_path)
+
+    def _enqueue(self, wav_path: Path) -> None:
+        try:
+            self.store.enqueue(wav_path, str(self.settings.get("model", DEFAULT_TRANSCRIPTION_MODEL)),
+                               str(self.settings.get("language", "en")))
+        except Exception:
+            logging.exception("Could not queue saved recording")
+            self.notify("Audio Saved", "Could not queue transcription. Your recording is in Dictation History.", QSystemTrayIcon.Critical)
+            return
+        self._process_queue()
+
+    def _process_queue(self) -> None:
+        if self._closing or self._is_transcribing:
+            return
+        # completed is emitted just before QThread.run returns. Never destroy a
+        # still-running thread by replacing the sole Python reference to it.
+        if self._worker_thread is not None and self._worker_thread.isRunning():
+            return
+        try:
+            job = self.store.next_job()
+            if job is None:
+                return
+            wav_path = Path(job["path"])
+            self.store.update(wav_path, state="transcribing", attempts=job.get("attempts", 0) + 1)
+        except Exception:
+            logging.exception("Could not read or update transcription queue")
+            return
+        self._active_job_path = wav_path
         self._is_transcribing = True
-        self.set_status("Transcribing...")
+        self.retry_action.setEnabled(False)
+        if not self._is_recording:
+            self.set_status("Transcribing saved audio...")
         self._worker_thread = TranscriptionThread(
             service=self.transcription_service,
             wav_path=wav_path,
-            model=str(self.settings.get("model", DEFAULT_TRANSCRIPTION_MODEL)),
-            language=str(self.settings.get("language", "en")),
+            model=str(job.get("model", self.settings.get("model", DEFAULT_TRANSCRIPTION_MODEL))),
+            language=str(job.get("language", self.settings.get("language", "en"))),
+            store=self.store,
         )
         self._worker_thread.completed.connect(self._on_transcription_finished)
+        self._worker_thread.finished.connect(self._process_queue)
         self._worker_thread.start()
 
     def _on_transcription_finished(self, result: TranscriptionResult) -> None:
+        wav_path = self._active_job_path
+        self._active_job_path = None
         self._is_transcribing = False
-        self.retry_action.setEnabled(self._last_recording is not None)
+        self.retry_action.setEnabled(not self._is_recording and self._last_recording is not None)
 
-        if not result.ok:
-            self._report_failure(result.error_kind, result.message)
+        if not result.ok or not result.text.strip():
+            kind = result.error_kind or TranscriptionErrorKind.UNKNOWN
+            message = result.message or "OpenAI returned no text. Your audio is saved in Dictation History."
+            if wav_path is not None:
+                try:
+                    job = self.store.read(wav_path)
+                    transient = kind in (TranscriptionErrorKind.CONNECTION_FAILED, TranscriptionErrorKind.RATE_LIMITED,
+                                         TranscriptionErrorKind.SERVICE_UNAVAILABLE)
+                    delay = min(60, 2 ** min(job.get("attempts", 1), 6))
+                    self.store.update(wav_path, state="retry" if transient else "failed",
+                                      next_retry=time.time() + delay, error=message)
+                    if transient:
+                        if not self._is_recording:
+                            self.set_status("Audio saved — retrying automatically")
+                        if job.get("attempts", 1) == 1:
+                            self.notify("Audio Saved", "Connection interrupted. WhisperApp will retry automatically. You can keep dictating.")
+                        return
+                except Exception:
+                    logging.exception("Could not save transcription failure state")
+                self._paste_targets.pop(str(wav_path), None)
+            self._report_failure(kind, message)
             return
 
         text = result.text.strip()
-        if not text:
-            # A 200 with nothing in it: still a failure from where the user is sitting.
-            self._report_failure(
-                TranscriptionErrorKind.UNKNOWN,
-                "The transcription came back empty. Nothing was heard in the recording.",
-            )
-            return
-
         self._last_failure_kind = None
         self._last_text = text
         self.copy_action.setEnabled(True)
+        if wav_path is not None:
+            try:
+                self.store.complete(wav_path, text)
+            except Exception:
+                logging.exception("Failed to save text; exposing it for manual recovery")
+                QMessageBox.warning(None, "Text Could Not Be Saved", "Copy this text now:\n\n" + text)
+        target = self._paste_targets.pop(str(wav_path), None)
+        # Recovered/backlogged text must not be pasted into an unrelated window.
+        if self._is_recording or target is None or target != self.text_inserter.foreground_window():
+            if not self._is_recording:
+                self.set_status("Text saved — open Dictation History")
+            self.notify("Dictation Saved", "Your text is ready in Dictation History and Copy Last Transcription.")
+            return
         try:
             inserted = self.text_inserter.insert_text(
                 text=text,
@@ -693,7 +800,8 @@ class WhisperTrayApp(QObject):
         detail = (message or "").strip() or "The API returned no detail. See the log."
         logging.error("Transcription failed (%s): %s", kind.name, detail)
 
-        self.set_status(ERROR_STATUSES.get(kind, "Failed"))
+        if not self._is_recording:
+            self.set_status(ERROR_STATUSES.get(kind, "Failed"))
         self.notify(headline, detail, QSystemTrayIcon.Critical)
 
         is_new_episode = kind is not self._last_failure_kind
@@ -702,7 +810,7 @@ class WhisperTrayApp(QObject):
         # A balloon is easy to miss and Focus Assist can swallow it outright. Quota
         # exhaustion is the one failure the user can only fix off-app, so it gets a
         # modal naming the billing page - once per episode, not once per attempt.
-        if kind is TranscriptionErrorKind.QUOTA_EXHAUSTED and is_new_episode:
+        if kind is TranscriptionErrorKind.QUOTA_EXHAUSTED and is_new_episode and not self._is_recording:
             QMessageBox.critical(
                 None,
                 headline,
@@ -712,7 +820,7 @@ class WhisperTrayApp(QObject):
                     "WhisperApp cannot transcribe until the account has credit."
                 ),
             )
-        elif kind is TranscriptionErrorKind.NOT_CONFIGURED and is_new_episode:
+        elif kind is TranscriptionErrorKind.NOT_CONFIGURED and is_new_episode and not self._is_recording:
             QMessageBox.warning(
                 None,
                 headline,
@@ -720,6 +828,8 @@ class WhisperTrayApp(QObject):
             )
 
     def cleanup(self) -> None:
+        self._closing = True
+        self._queue_timer.stop()
         try:
             self.recording_indicator.hide_indicator()
         except Exception:
@@ -732,6 +842,10 @@ class WhisperTrayApp(QObject):
             self.audio_recorder.terminate()
         except Exception:
             logging.exception("Audio recorder shutdown failed")
+        # The worker saves its result before exiting. Do not destroy QThread while
+        # it is running; queued jobs remain on disk if the process is terminated.
+        if self._worker_thread is not None:
+            self._worker_thread.wait()
 
 
 def main() -> int:
@@ -756,8 +870,6 @@ def main() -> int:
         )
         return 0
 
-    app.aboutToQuit.connect(guard.release)
-
     if not QSystemTrayIcon.isSystemTrayAvailable():
         logging.error("System tray is not available")
         QMessageBox.critical(None, "WhisperApp", "System tray is not available.")
@@ -775,7 +887,11 @@ def main() -> int:
         return 1
 
     logging.info("WhisperApp started")
-    return app.exec_()
+    try:
+        return app.exec_()
+    finally:
+        # Hold the mutex until cleanup (including the current worker) has finished.
+        guard.release()
 
 
 if __name__ == "__main__":

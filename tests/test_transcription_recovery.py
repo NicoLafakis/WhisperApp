@@ -5,6 +5,7 @@ from PyQt5.QtCore import QObject
 
 from whisperapp.main import WhisperTrayApp
 from whisperapp.transcription_service import TranscriptionErrorKind, TranscriptionResult
+from whisperapp.dictation_store import DictationStore
 
 
 @pytest.fixture
@@ -14,7 +15,7 @@ def tray(tmp_path):
     QObject.__init__(controller)
     controller._is_recording = False
     controller._is_transcribing = False
-    controller._last_recording = tmp_path / "recording.wav"
+    controller._last_recording = tmp_path / "recording_test.wav"
     controller._last_recording.write_bytes(b"saved audio")
     controller.retry_action = MagicMock()
     controller.notify = MagicMock()
@@ -24,11 +25,20 @@ def tray(tmp_path):
     controller.transcription_service = MagicMock()
     controller.copy_action = MagicMock()
     controller.text_inserter = MagicMock()
+    controller._closing = False
+    controller._worker_thread = None
+    controller._active_job_path = controller._last_recording
+    controller._capture_target = 123
+    controller.text_inserter.foreground_window.return_value = 123
+    controller._paste_targets = {str(controller._last_recording): 123}
+    controller.store = DictationStore(tmp_path)
+    controller.store.enqueue(controller._last_recording, "gpt-transcribe", "en")
     return controller
 
 
 def test_failed_transcription_can_retry_saved_audio(tray, monkeypatch):
     worker = MagicMock()
+    worker.isRunning.return_value = False
     factory = MagicMock(return_value=worker)
     monkeypatch.setattr("whisperapp.main.TranscriptionThread", factory)
     tray._is_transcribing = True

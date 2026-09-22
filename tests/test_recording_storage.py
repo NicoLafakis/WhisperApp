@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from whisperapp import audio_recorder as ar
+from whisperapp.dictation_store import DictationStore
 
 
 def _touch_wav(path: Path, *, mtime: float) -> Path:
@@ -84,16 +85,17 @@ def test_retention_default_is_twenty_five():
     assert ar.MAX_RETAINED_RECORDINGS == 25
 
 
-def test_starting_a_take_prunes_down_to_the_retention_limit(fake_pyaudio, tmp_path):
+def test_starting_a_take_prunes_only_completed_audio(fake_pyaudio, tmp_path):
     recorder = ar.AudioRecorder()
     try:
         now = time.time()
         # 30 takes, oldest first: recording_00 is the stalest.
         for index in range(30):
-            _touch_wav(
+            path = _touch_wav(
                 recorder.recordings_dir / f"recording_{index:02d}.wav",
                 mtime=now - (30 - index) * 60,
             )
+            DictationStore(recorder.recordings_dir).complete(path, f"Finished dictation {index}")
 
         # The prune runs when a take starts, so the directory is trimmed before the
         # new WAV lands - assert on that moment rather than after the take is written.
@@ -101,7 +103,9 @@ def test_starting_a_take_prunes_down_to_the_retention_limit(fake_pyaudio, tmp_pa
 
         survivors = _names(recorder.recordings_dir)
         expected = {f"recording_{index:02d}.wav" for index in range(30 - 25, 30)}
-        assert survivors == expected, "pruning did not keep exactly the 25 newest takes"
+        expected.add(recorder.output_path.name)
+        assert survivors == expected, "pruning did not keep completed audio plus the active take"
+        assert len(list(recorder.recordings_dir.glob("*.txt"))) == 30
 
         recorder.stop_recording()
     finally:
@@ -131,6 +135,20 @@ def test_pruning_never_deletes_the_take_being_recorded(fake_pyaudio, monkeypatch
 
         assert path == in_flight
         assert in_flight.exists(), "the take just recorded was pruned away"
+    finally:
+        recorder.terminate()
+
+
+def test_retention_preserves_all_unfinished_and_legacy_recordings(fake_pyaudio):
+    recorder = ar.AudioRecorder()
+    try:
+        store = DictationStore(recorder.recordings_dir)
+        for index in range(40):
+            path = _touch_wav(recorder.recordings_dir / f"recording_pending_{index}.wav", mtime=time.time() - index)
+            if index % 2:
+                store.update(path, state="retry", next_retry=0)
+        recorder._cleanup_old_recordings()
+        assert len(_names(recorder.recordings_dir)) == 40
     finally:
         recorder.terminate()
 
@@ -186,6 +204,41 @@ def test_migration_leaves_non_recording_files_alone(fake_pyaudio, tmp_path):
         assert not (recorder.recordings_dir / "whisperapp.log").exists()
     finally:
         recorder.terminate()
+
+
+def test_migration_preserves_queue_and_transcript_sidecars(fake_pyaudio):
+    source = ar._legacy_recordings_dir()
+    source.mkdir(parents=True)
+    store = DictationStore(source)
+    completed = _touch_wav(source / "recording_completed.wav", mtime=time.time())
+    store.complete(completed, "Recovered paragraph")
+    pending = _touch_wav(source / "recording_pending.wav", mtime=time.time())
+    store.enqueue(pending, "gpt-transcribe", "en")
+    pruned = _touch_wav(source / "recording_pruned.wav", mtime=time.time())
+    store.complete(pruned, "Text without retained audio")
+    pruned.unlink()
+    recorder = ar.AudioRecorder()
+    try:
+        migrated = DictationStore(recorder.recordings_dir)
+        assert migrated.text(recorder.recordings_dir / completed.name) == "Recovered paragraph"
+        assert migrated.text(recorder.recordings_dir / pruned.name) == "Text without retained audio"
+        assert migrated.next_job()["path"] == str(recorder.recordings_dir / pending.name)
+        assert not source.exists()
+    finally:
+        recorder.terminate()
+
+
+def test_migration_collision_keeps_original_audio_and_companions(fake_pyaudio):
+    source = ar._legacy_recordings_dir()
+    source.mkdir(parents=True)
+    destination = ar._prepare_recordings_dir()
+    old = _touch_wav(source / "recording_collision.wav", mtime=time.time())
+    DictationStore(source).complete(old, "Original text")
+    target = _touch_wav(destination / old.name, mtime=time.time())
+    DictationStore(destination).complete(target, "Destination text")
+    ar._migrate_legacy_recordings(destination)
+    assert DictationStore(source).text(old) == "Original text"
+    assert DictationStore(destination).text(target) == "Destination text"
 
 
 def test_a_broken_legacy_directory_does_not_stop_the_app(fake_pyaudio, monkeypatch):

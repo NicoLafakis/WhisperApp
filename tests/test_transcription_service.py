@@ -144,7 +144,7 @@ def test_network_failure_has_actionable_retry_message(service, fake_openai, wav_
     )
     result = service.transcribe(wav_path, "gpt-transcribe", "en")
     assert result.error_kind is svc.TranscriptionErrorKind.CONNECTION_FAILED
-    assert "Retry Last Recording" in result.message
+    assert "retried automatically" in result.message
 
 
 def test_unconfigured_service_is_classified_not_configured(fake_openai, wav_path):

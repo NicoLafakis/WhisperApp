@@ -62,6 +62,5 @@ Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: st
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
-[UninstallDelete]
-Type: filesandordirs; Name: "{userappdata}\.whisperapp"
-
+; Preserve encrypted settings and user dictation data across uninstall/reinstall.
+; The user can remove those files explicitly when they want to erase their data.
