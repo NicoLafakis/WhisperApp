@@ -1,6 +1,6 @@
 # Dictation latency and feedback remediation
 
-**Status:** Implemented and supervisor reviewed; automated and package verification complete; installed-app replacement pending
+**Status:** Implemented, supervisor reviewed, built, reinstalled, and restarted
 **Scope:** Push-to-talk startup/save latency, recording feedback, transcription progress, and clipboard recovery.
 
 ## Findings
@@ -27,5 +27,6 @@ The indicator is immediate, but actual microphone activation still depends on Wi
 - Focused tests cover worker-thread startup, immediate UI feedback, release during startup, scanner motion in silence, meter update before a blocked disk sync, streamed text deltas, legacy model fallback, and clipboard replacement after focus changes.
 - Full suite: **123 passed, 1 skipped**. The skipped release-verifier test requires `Microsoft.PowerShell.Security`, which this host failed to load; the other release certificate and signer tests ran.
 - PyInstaller onedir build completed with Python 3.12.14 and PyInstaller 6.22.0; Inno Setup 6.7.3 produced `installer/WhisperApp-Setup-1.1.0.exe` (unsigned development build).
+- Uninstalled the prior copy, installed this package, and launched the installed executable. The new process remained running; the settings directory and 79 recording-store files were present after installation.
 - The reviewer signed off after checking that the PRD matches the existing concurrent-upload behavior and clipboard fallback. `git diff --check` passed.
 - Physical microphone activation and a live OpenAI transcription were not exercised in this unattended pass. The earlier local PortAudio diagnostic could not open the microphone device, so the device-dependent latency and captured-audio path still need a real user dictation to verify.
