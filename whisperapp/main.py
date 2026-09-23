@@ -1,5 +1,6 @@
 ﻿import ctypes
 import logging
+import math
 import sys
 import time
 from pathlib import Path
@@ -7,7 +8,7 @@ from tempfile import gettempdir
 from typing import Callable, Optional
 
 from PyQt5.QtCore import QObject, QRectF, QThread, QTimer, Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PyQt5.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAction,
     QApplication,
@@ -206,25 +207,39 @@ class RecordingIndicator(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setFixedSize(340, 74)
+        self.setFixedSize(340, 112)
         self._volume_provider = volume_provider or (lambda: 0.0)
         self._phase = 0.0
         self._display_level = 0.0
+        self._peak_level = 0.008
         self._state = "STARTING"
+        self._state_started = time.monotonic()
         self._partial_text = ""
         self._timer = QTimer(self)
         self._timer.setInterval(33)
         self._timer.timeout.connect(self._tick)
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(self.hide_indicator)
 
     def show_indicator(self) -> None:
-        self._phase = 0.0
-        self._display_level = 0.0
-        self._position_center_screen()
+        self._hide_timer.stop()
+        if not self.isVisible():
+            self._phase = 0.0
+            self._display_level = 0.0
+            self._peak_level = 0.008
+            self._state_started = time.monotonic()
+            self._position_center_screen()
         self._timer.start()
         self.show()
         self.raise_()
 
     def set_state(self, state: str) -> None:
+        self._hide_timer.stop()
+        if state != self._state:
+            self._state_started = time.monotonic()
+            if state != "RECORDING":
+                self._display_level = 0.0
         self._state = state
         self.update()
 
@@ -233,8 +248,15 @@ class RecordingIndicator(QWidget):
         self.update()
 
     def hide_indicator(self) -> None:
+        self._hide_timer.stop()
         self._timer.stop()
         self.hide()
+
+    def finish(self, state: str, message: str, visible_ms: int) -> None:
+        self.show_indicator()
+        self.set_state(state)
+        self.set_partial_text(message)
+        self._hide_timer.start(visible_ms)
 
     def _position_center_screen(self) -> None:
         screen = QApplication.primaryScreen()
@@ -243,60 +265,79 @@ class RecordingIndicator(QWidget):
         rect = screen.availableGeometry()
         self.move(
             rect.left() + (rect.width() - self.width()) // 2,
-            rect.top() + (rect.height() - self.height()) // 2,
+            rect.bottom() - self.height() - 28,
         )
 
     def _tick(self) -> None:
-        raw_level = max(0.0, min(1.0, self._volume_provider()))
-        active_level = max(0.0, min(1.0, (raw_level - 0.003) / 0.077)) ** 0.6
-
-        smoothing = 0.34 if active_level > self._display_level else 0.09
-        self._display_level += (active_level - self._display_level) * smoothing
-        if self._display_level < 0.006 and active_level <= 0.0:
-            self._display_level = 0.0
-        # Keep the scanner moving in silence too. A flat room or a quiet laptop mic
-        # should still look alive while the app is listening.
-        self._phase = (self._phase + 0.035) % 2.0
+        if self._state == "RECORDING":
+            raw_level = max(0.0, min(1.0, self._volume_provider()))
+            self._peak_level = max(raw_level, self._peak_level * 0.99, 0.008)
+            active_level = min(1.0, max(0.0, raw_level - 0.0002) / self._peak_level * 1.3) ** 0.65
+            smoothing = 0.42 if active_level > self._display_level else 0.17
+            self._display_level += (active_level - self._display_level) * smoothing
+            if self._display_level < 0.006 and active_level == 0.0:
+                self._display_level = 0.0
+        elif self._state not in ("DONE", "FAILED", "TEXT READY"):
+            # This motion denotes work in progress; it is not a fake mic reading.
+            self._phase = (self._phase + 0.11) % 6.28
         self.update()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        level = self._display_level
         painter.setPen(QPen(QColor(130, 24, 25, 225), 1))
         painter.setBrush(QColor(10, 13, 17, 246))
         painter.drawRoundedRect(QRectF(1, 1, self.width() - 2, self.height() - 2), 12, 12)
 
         painter.setFont(QFont("Segoe UI", 9, QFont.DemiBold))
         painter.setPen(QColor(255, 95, 75))
-        painter.drawText(QRectF(16, 9, 305, 17), Qt.AlignLeft | Qt.AlignVCenter, self._state)
+        label = {
+            "STARTING": "OPENING MIC", "RECORDING": "RECORDING", "SAVING": "SAVING",
+            "TRANSCRIBING": "PROCESSING", "QUEUED": "QUEUED", "RETRYING": "RETRYING",
+            "DONE": "DONE", "FAILED": "FAILED", "TEXT READY": "TEXT READY",
+        }.get(self._state, self._state)
+        painter.drawText(QRectF(16, 9, 220, 17), Qt.AlignLeft | Qt.AlignVCenter, label)
+        if self._state not in ("DONE", "FAILED", "TEXT READY"):
+            elapsed = int(time.monotonic() - self._state_started)
+            painter.setPen(QColor(150, 160, 170))
+            painter.drawText(QRectF(255, 9, 68, 17), Qt.AlignRight | Qt.AlignVCenter,
+                             f"{elapsed // 60:02d}:{elapsed % 60:02d}")
         message = self._partial_text or {
             "STARTING": "Opening microphone…",
             "RECORDING": "Listening — release hotkey to transcribe",
             "SAVING": "Saving recording…",
-            "TRANSCRIBING": "Uploading audio for transcription…",
+            "TRANSCRIBING": "Uploading and transcribing audio…",
+            "QUEUED": "Saved; waiting for earlier dictation…",
+            "RETRYING": "Connection interrupted; retrying…",
         }.get(self._state, "")
         painter.setFont(QFont("Segoe UI", 8))
         painter.setPen(QColor(218, 224, 230))
         painter.drawText(QRectF(16, 27, 307, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                         painter.fontMetrics().elidedText(message, Qt.ElideRight, 307))
+                         painter.fontMetrics().elidedText(message, Qt.ElideLeft, 307))
 
-        track = QRectF(16, 53, 308, 8)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(48, 20, 22))
-        painter.drawRoundedRect(track, 4, 4)
-        progress = self._phase if self._phase <= 1.0 else 2.0 - self._phase
-        beam_width = 30 + level * 18
-        beam_x = track.left() + progress * (track.width() - beam_width)
-        beam = QRectF(beam_x, 51, beam_width, 12)
-        painter.setBrush(QColor(255, 0, 0, 45 + int(level * 55)))
-        painter.drawRoundedRect(beam.adjusted(-8, -4, 8, 4), 8, 8)
-        gradient = QLinearGradient(beam.topLeft(), beam.topRight())
-        gradient.setColorAt(0.0, QColor(190, 4, 12, 70))
-        gradient.setColorAt(0.5, QColor(255, 45 + int(level * 90), 35, 255))
-        gradient.setColorAt(1.0, QColor(190, 4, 12, 70))
-        painter.setBrush(gradient)
-        painter.drawRoundedRect(beam, 5, 5)
+        # KITT's voice module is a compact bank of red LED columns. During capture
+        # the lit segments follow the microphone level; after release they pulse
+        # separately to show that the saved audio is still being processed.
+        painter.setPen(QPen(QColor(83, 28, 31), 1))
+        painter.setBrush(QColor(20, 10, 13))
+        painter.drawRoundedRect(QRectF(126, 51, 88, 54), 5, 5)
+        for column in range(3):
+            if self._state == "RECORDING":
+                height = max(1, round(self._display_level * (0.78, 1.0, 0.86)[column] * 8))
+            elif self._state in ("DONE", "TEXT READY"):
+                height = 5
+            elif self._state == "FAILED":
+                height = 1
+            else:
+                height = 2 + round((1 + math.sin(self._phase + column * 1.4)) * 2.5)
+            for segment in range(8):
+                rect = QRectF(138 + column * 22, 96 - segment * 6, 17, 4)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(64, 15, 20) if segment >= height else QColor(235, 24, 28))
+                painter.drawRoundedRect(rect, 1.2, 1.2)
+                if segment < height:
+                    painter.setBrush(QColor(255, 103, 75, 115))
+                    painter.drawRoundedRect(QRectF(rect.left() + 2, rect.top(), 13, 1.6), 0.7, 0.7)
 
 
 class WhisperTrayApp(QObject):
@@ -336,6 +377,7 @@ class WhisperTrayApp(QObject):
         self._is_transcribing = False
         self._worker_thread = None
         self._last_recording: Optional[Path] = None
+        self._indicator_job_path: Optional[Path] = None
         self._last_text = ""
         self._active_job_path = None
         self._paste_targets = {}
@@ -555,12 +597,14 @@ class WhisperTrayApp(QObject):
             # A new dictation supersedes the paste destination of older queued
             # work; that text remains in history instead of arriving out of order.
             self._paste_targets.clear()
+            self._indicator_job_path = None
             self._is_recording = True
             self._is_starting = True
             self._stop_after_start = False
             self.retry_action.setEnabled(False)
             self.recording_indicator.show_indicator()
             self.recording_indicator.set_state("STARTING")
+            self.recording_indicator.set_partial_text("")
             self.set_status("Opening microphone...")
             self._start_audio_operation("start")
         except Exception as exc:
@@ -579,7 +623,7 @@ class WhisperTrayApp(QObject):
             else:
                 self._is_recording = False
                 self._is_stopping = False
-                self.recording_indicator.hide_indicator()
+                self.recording_indicator.finish("FAILED", "Audio could not be saved. Check Dictation History.", 7000)
                 logging.error(
                     "Recording stop failed",
                     exc_info=(type(worker.error), worker.error, worker.error.__traceback__),
@@ -604,12 +648,12 @@ class WhisperTrayApp(QObject):
 
         self._is_recording = False
         self._is_stopping = False
-        self.recording_indicator.hide_indicator()
         wav_path = worker.result
         if wav_path is None:
             self.retry_action.setEnabled(self._last_recording is not None)
             self.set_status("Ready")
             self.notify("No Audio Recorded", "No audio captured for transcription.")
+            self.recording_indicator.finish("FAILED", "No audio was captured.", 5000)
             return
         self._start_transcription(wav_path)
 
@@ -620,7 +664,7 @@ class WhisperTrayApp(QObject):
         self._stop_after_start = False
         logging.error("Recording start failed", exc_info=(type(exc), exc, exc.__traceback__))
         self.retry_action.setEnabled(self._last_recording is not None)
-        self.recording_indicator.hide_indicator()
+        self.recording_indicator.finish("FAILED", "Microphone could not be opened.", 7000)
         self.set_status("Failed: microphone unavailable")
         self.notify("Recording Error", str(exc))
 
@@ -652,7 +696,6 @@ class WhisperTrayApp(QObject):
             return
 
         self._is_recording = False
-        self.recording_indicator.hide_indicator()
 
         cap = self.audio_recorder.max_duration_seconds
         limit = f"{cap / 60:.0f} minute" if cap >= 90 else f"{cap:g} second"
@@ -667,6 +710,7 @@ class WhisperTrayApp(QObject):
         if wav_path is None:
             self.retry_action.setEnabled(self._last_recording is not None)
             self.set_status("Ready")
+            self.recording_indicator.finish("FAILED", "No audio was captured.", 5000)
             return
 
         self._start_transcription(wav_path)
@@ -698,22 +742,32 @@ class WhisperTrayApp(QObject):
             self.show_history()
             return
         self._paste_targets.pop(path, None)
-        self._enqueue(wav_path)
+        if not self._enqueue(wav_path):
+            return
 
     def _start_transcription(self, wav_path: Path) -> None:
         self._last_recording = wav_path
+        self._indicator_job_path = wav_path
         self._paste_targets[str(wav_path)] = self._capture_target
-        self._enqueue(wav_path)
+        if not self._enqueue(wav_path):
+            return
+        if self._is_transcribing and self._active_job_path != wav_path and not self._is_recording:
+            self.recording_indicator.set_state("QUEUED")
+            self.recording_indicator.set_partial_text("Saved; waiting for earlier dictation…")
+            self.set_status("Recording saved — queued for transcription")
 
-    def _enqueue(self, wav_path: Path) -> None:
+    def _enqueue(self, wav_path: Path) -> bool:
         try:
             self.store.enqueue(wav_path, str(self.settings.get("model", DEFAULT_TRANSCRIPTION_MODEL)),
                                str(self.settings.get("language", "en")))
         except Exception:
             logging.exception("Could not queue saved recording")
             self.notify("Audio Saved", "Could not queue transcription. Your recording is in Dictation History.", QSystemTrayIcon.Critical)
-            return
+            if not self._is_recording:
+                self.recording_indicator.finish("FAILED", "Audio saved; open Dictation History.", 7000)
+            return False
         self._process_queue()
+        return True
 
     def _process_queue(self) -> None:
         if self._closing or self._is_transcribing:
@@ -730,15 +784,20 @@ class WhisperTrayApp(QObject):
             self.store.update(wav_path, state="transcribing", attempts=job.get("attempts", 0) + 1)
         except Exception:
             logging.exception("Could not read or update transcription queue")
+            if not self._is_recording:
+                self.recording_indicator.finish("FAILED", "Audio saved; queue unavailable.", 7000)
             return
         self._active_job_path = wav_path
         self._is_transcribing = True
         self.retry_action.setEnabled(False)
         if not self._is_recording:
-            self.recording_indicator.show_indicator()
-            self.recording_indicator.set_state("TRANSCRIBING")
-            self.recording_indicator.set_partial_text("")
-            self.set_status("Transcribing saved audio...")
+            if self._indicator_job_path is None:
+                self._indicator_job_path = wav_path
+            if self._indicator_job_path == wav_path:
+                self.recording_indicator.show_indicator()
+                self.recording_indicator.set_state("TRANSCRIBING")
+                self.recording_indicator.set_partial_text("")
+                self.set_status("Transcribing saved audio...")
         self._worker_thread = TranscriptionThread(
             service=self.transcription_service,
             wav_path=wav_path,
@@ -752,18 +811,20 @@ class WhisperTrayApp(QObject):
         self._worker_thread.start()
 
     def _on_transcription_partial(self, text: str) -> None:
-        if self._is_recording or self._closing:
+        if (self._is_recording or self._closing or not self._is_transcribing
+                or self._active_job_path != self._indicator_job_path):
             return
         self.recording_indicator.set_state("TRANSCRIBING")
         self.recording_indicator.set_partial_text(text)
 
     def _on_transcription_finished(self, result: TranscriptionResult) -> None:
         wav_path = self._active_job_path
+        display_current = not self._is_recording and wav_path == self._indicator_job_path
+        if display_current:
+            self._indicator_job_path = None
         self._active_job_path = None
         self._is_transcribing = False
         self.retry_action.setEnabled(not self._is_recording and self._last_recording is not None)
-        if not self._is_recording:
-            self.recording_indicator.hide_indicator()
 
         if not result.ok or not result.text.strip():
             kind = result.error_kind or TranscriptionErrorKind.UNKNOWN
@@ -778,15 +839,21 @@ class WhisperTrayApp(QObject):
                     self.store.update(wav_path, state="retry" if transient else "failed",
                                       next_retry=time.time() + delay, error=message)
                     if transient:
-                        if not self._is_recording:
+                        if display_current:
                             self.set_status("Audio saved — retrying; clipboard unchanged")
+                            self.recording_indicator.set_state("RETRYING")
+                            self.recording_indicator.set_partial_text(
+                                f"Connection interrupted; retrying in {delay}s…"
+                            )
                         if job.get("attempts", 1) == 1:
                             self.notify("Audio Saved", "Connection interrupted. WhisperApp will retry automatically. You can keep dictating.")
                         return
                 except Exception:
                     logging.exception("Could not save transcription failure state")
                 self._paste_targets.pop(str(wav_path), None)
-            self._report_failure(kind, message)
+            if display_current:
+                self.recording_indicator.finish("FAILED", "Audio saved; check Dictation History.", 7000)
+            self._report_failure(kind, message, show_status=display_current)
             return
 
         text = result.text.strip()
@@ -805,14 +872,17 @@ class WhisperTrayApp(QObject):
             if bool(self.settings.get("auto_copy", True)):
                 try:
                     self.text_inserter.copy_text(text)
-                    if not self._is_recording:
+                    if display_current:
                         self.set_status("Text saved and copied — open Dictation History")
+                        self.recording_indicator.finish("DONE", "Text copied. Paste with Ctrl+V.", 3500)
                 except Exception:
                     logging.exception("Clipboard copy failed for completed transcription")
-                    if not self._is_recording:
+                    if display_current:
                         self.set_status("Text saved — open Dictation History")
-            elif not self._is_recording:
+                        self.recording_indicator.finish("TEXT READY", "Text saved; copy from Dictation History.", 7000)
+            elif display_current:
                 self.set_status("Text saved — open Dictation History")
+                self.recording_indicator.finish("TEXT READY", "Text saved in Dictation History.", 7000)
             self.notify("Dictation Saved", "Your text is ready in Dictation History and Copy Last Transcription.")
             return
         try:
@@ -824,10 +894,15 @@ class WhisperTrayApp(QObject):
             logging.exception("Text insertion failed; transcription retained")
             inserted = False
         if not inserted:
-            self.set_status("Transcribed: use Copy Last Transcription")
+            if display_current:
+                self.set_status("Transcribed: use Copy Last Transcription")
             self.notify("Text Ready", "Automatic paste failed. Use Copy Last Transcription in the tray menu.")
+            if display_current:
+                self.recording_indicator.finish("TEXT READY", "Paste failed; copy from tray menu.", 7000)
             return
-        self.set_status("Ready")
+        if display_current:
+            self.set_status("Ready")
+            self.recording_indicator.finish("DONE", "Text inserted.", 1800)
 
         if bool(self.settings.get("show_notifications", True)):
             self.notify("Transcription Complete", text)
@@ -843,7 +918,7 @@ class WhisperTrayApp(QObject):
             return
         self.notify("Text Copied", "Paste your transcription with Ctrl+V.")
 
-    def _report_failure(self, kind: TranscriptionErrorKind, message: str) -> None:
+    def _report_failure(self, kind: TranscriptionErrorKind, message: str, *, show_status: bool = True) -> None:
         """Surface a failure so it cannot be mistaken for success.
 
         The tray status used to be reset to "Ready" before notifying, which made a total
@@ -854,7 +929,7 @@ class WhisperTrayApp(QObject):
         detail = (message or "").strip() or "The API returned no detail. See the log."
         logging.error("Transcription failed (%s): %s", kind.name, detail)
 
-        if not self._is_recording:
+        if show_status and not self._is_recording:
             self.set_status(ERROR_STATUSES.get(kind, "Failed"))
         self.notify(headline, detail, QSystemTrayIcon.Critical)
 

@@ -43,11 +43,12 @@ preferences. Settings offers `whisper-1` as a temporary manual fallback; that ch
 survives subsequent launches. Test API Key checks the selected model.
 
 The hotkey still records while held, then transcribes and pastes on release. Startup
-and save work runs off the UI thread; the on-screen Knight Rider scanner immediately
-shows whether the microphone is opening, recording, saving, or transcribing. For the
-default GPT Transcribe model, the overlay also shows partial text while OpenAI processes
-the completed recording. Partial text is only a preview; only the final result is
-inserted. `whisper-1` uses its normal non-streaming response. If automatic paste is
+and save work runs off the UI thread. The on-screen KITT-style three-column voice
+module responds to microphone level while recording. After release it stays visible
+with an animated processing state, elapsed time, partial transcript preview (for GPT
+Transcribe), and automatic retry status until text is ready or the job fails. Partial
+text is only a preview; only the final result is inserted. `whisper-1` uses its normal
+non-streaming response. If automatic paste is
 skipped because focus changed, a completed result is copied to the clipboard when
 automatic copy is enabled. Failed transcription leaves the clipboard untouched and
 clearly reports that the audio is saved in Dictation History.
@@ -55,7 +56,8 @@ clearly reports that the audio is saved in Dictation History.
 The language selector supplies the plural `languages` hint required by GPT Transcribe;
 Auto Detect omits the hint. File transcription can stream partial text after the audio
 has been recorded and uploaded. Live transcription while the microphone is still
-capturing requires the separate Realtime API path. See [OpenAI file transcription](https://developers.openai.com/api/docs/guides/speech-to-text).
+capturing is possible with a separate [Realtime transcription session](https://developers.openai.com/api/docs/guides/realtime-transcription);
+the current push-to-talk flow uses file transcription. See [OpenAI file transcription](https://developers.openai.com/api/docs/guides/speech-to-text).
 
 Run regression checks with `python -m pytest -q`.
 

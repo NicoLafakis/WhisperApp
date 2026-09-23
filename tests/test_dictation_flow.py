@@ -141,13 +141,40 @@ def test_release_during_startup_is_deferred_until_microphone_is_ready(monkeypatc
         app.aboutToQuit.disconnect(controller.cleanup)
 
 
-def test_recording_indicator_sweeps_during_silence_and_shows_partial_text():
+def test_voice_modulator_responds_to_input_and_processing_animates_without_audio():
     app = QApplication.instance() or QApplication([])
-    indicator = main.RecordingIndicator(lambda: 0.0)
+    volume = [0.0]
+    indicator = main.RecordingIndicator(lambda: volume[0])
+    indicator.set_state("RECORDING")
+    indicator._tick()
+    silent_level = indicator._display_level
+    silent_image = indicator.grab().toImage()
+    volume[0] = 0.02
+    for _ in range(4):
+        indicator._tick()
+    assert indicator._display_level > silent_level
+    speaking_image = indicator.grab().toImage()
+    for x in (146, 168, 190):
+        assert speaking_image.pixelColor(x, 74).red() > silent_image.pixelColor(x, 74).red() + 100
+
     indicator.set_state("TRANSCRIBING")
     indicator.set_partial_text("A partial result")
     before = indicator._phase
+    volume[0] = 0.0
+    processing_image = indicator.grab().toImage()
     indicator._tick()
     assert indicator._phase != before
+    for _ in range(6):
+        indicator._tick()
+    assert indicator.grab().toImage() != processing_image
     assert indicator._state == "TRANSCRIBING"
     assert indicator._partial_text == "A partial result"
+
+
+def test_new_processing_state_cancels_pending_terminal_hide():
+    app = QApplication.instance() or QApplication([])
+    indicator = main.RecordingIndicator(lambda: 0.0)
+    indicator.finish("DONE", "Text inserted", 1500)
+    assert indicator._hide_timer.isActive()
+    indicator.set_state("TRANSCRIBING")
+    assert not indicator._hide_timer.isActive()

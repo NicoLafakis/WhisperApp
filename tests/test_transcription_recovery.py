@@ -33,6 +33,7 @@ def tray(tmp_path):
     controller._closing = False
     controller._worker_thread = None
     controller._active_job_path = controller._last_recording
+    controller._indicator_job_path = controller._last_recording
     controller._capture_target = 123
     controller.text_inserter.foreground_window.return_value = 123
     controller._paste_targets = {str(controller._last_recording): 123}
@@ -98,9 +99,71 @@ def test_paste_exception_retains_text_for_recovery(tray):
 
 
 def test_successful_transcription_is_automatically_inserted(tray):
+    def insert(**kwargs):
+        tray.recording_indicator.hide_indicator.assert_not_called()
+        return True
+
+    tray.text_inserter.insert_text.side_effect = insert
     tray._on_transcription_finished(TranscriptionResult(text="Automatic dictation"))
     tray.text_inserter.insert_text.assert_called_once_with(text="Automatic dictation", auto_copy=True)
     tray.set_status.assert_called_with("Ready")
+    tray.recording_indicator.finish.assert_called_once()
+
+
+def test_stop_keeps_progress_visible_while_transcription_is_queued(tray):
+    tray._is_recording = True
+    tray._is_stopping = True
+    tray._start_transcription = MagicMock()
+    worker = type("SavedStop", (), {"operation": "stop", "error": None,
+                                      "result": tray._last_recording})()
+    tray._on_audio_operation_finished(worker)
+    tray.recording_indicator.hide_indicator.assert_not_called()
+    tray._start_transcription.assert_called_once_with(tray._last_recording)
+
+
+def test_transient_error_keeps_retry_progress_visible(tray):
+    tray._is_transcribing = True
+    tray._on_transcription_finished(TranscriptionResult(
+        error_kind=TranscriptionErrorKind.CONNECTION_FAILED,
+        message="Connection interrupted",
+    ))
+    tray.recording_indicator.hide_indicator.assert_not_called()
+    tray.recording_indicator.set_state.assert_called_with("RETRYING")
+    tray.recording_indicator.finish.assert_not_called()
+
+
+def test_older_result_does_not_replace_newer_queued_progress(tray, tmp_path):
+    newer = tmp_path / "newer.wav"
+    newer.write_bytes(b"saved audio")
+    tray._indicator_job_path = newer
+    tray._paste_targets.clear()
+    tray._is_transcribing = True
+
+    tray._on_transcription_partial("Older dictation preview")
+    tray.recording_indicator.set_state.assert_not_called()
+    tray._on_transcription_finished(TranscriptionResult(text="Older dictation result"))
+
+    tray.recording_indicator.finish.assert_not_called()
+    tray.recording_indicator.set_state.assert_not_called()
+    tray.set_status.assert_not_called()
+    assert tray._indicator_job_path == newer
+
+
+def test_older_retry_does_not_replace_newer_queued_progress(tray, tmp_path):
+    newer = tmp_path / "newer.wav"
+    newer.write_bytes(b"saved audio")
+    tray._indicator_job_path = newer
+    tray._is_transcribing = True
+
+    tray._on_transcription_finished(TranscriptionResult(
+        error_kind=TranscriptionErrorKind.CONNECTION_FAILED,
+        message="Connection interrupted",
+    ))
+
+    tray.recording_indicator.set_state.assert_not_called()
+    tray.recording_indicator.finish.assert_not_called()
+    tray.set_status.assert_not_called()
+    assert tray._indicator_job_path == newer
 
 
 def test_successful_text_goes_to_clipboard_when_focus_changed(tray):
