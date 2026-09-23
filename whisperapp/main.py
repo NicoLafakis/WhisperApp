@@ -320,10 +320,10 @@ class RecordingIndicator(QWidget):
         # separately to show that the saved audio is still being processed.
         painter.setPen(QPen(QColor(83, 28, 31), 1))
         painter.setBrush(QColor(20, 10, 13))
-        painter.drawRoundedRect(QRectF(126, 51, 88, 54), 5, 5)
-        for column in range(3):
+        painter.drawRoundedRect(QRectF(104, 51, 132, 54), 5, 5)
+        for column in range(5):
             if self._state == "RECORDING":
-                height = max(1, round(self._display_level * (0.78, 1.0, 0.86)[column] * 8))
+                height = max(1, round(self._display_level * (0.72, 0.88, 1.0, 0.88, 0.72)[column] * 8))
             elif self._state in ("DONE", "TEXT READY"):
                 height = 5
             elif self._state == "FAILED":
@@ -331,7 +331,7 @@ class RecordingIndicator(QWidget):
             else:
                 height = 2 + round((1 + math.sin(self._phase + column * 1.4)) * 2.5)
             for segment in range(8):
-                rect = QRectF(138 + column * 22, 96 - segment * 6, 17, 4)
+                rect = QRectF(116 + column * 22, 96 - segment * 6, 17, 4)
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QColor(64, 15, 20) if segment >= height else QColor(235, 24, 28))
                 painter.drawRoundedRect(rect, 1.2, 1.2)

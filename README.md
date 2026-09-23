@@ -43,7 +43,7 @@ preferences. Settings offers `whisper-1` as a temporary manual fallback; that ch
 survives subsequent launches. Test API Key checks the selected model.
 
 The hotkey still records while held, then transcribes and pastes on release. Startup
-and save work runs off the UI thread. The on-screen KITT-style three-column voice
+and save work runs off the UI thread. The on-screen KITT-style five-column voice
 module responds to microphone level while recording. After release it stays visible
 with an animated processing state, elapsed time, partial transcript preview (for GPT
 Transcribe), and automatic retry status until text is ready or the job fails. Partial

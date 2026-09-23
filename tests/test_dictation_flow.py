@@ -154,7 +154,7 @@ def test_voice_modulator_responds_to_input_and_processing_animates_without_audio
         indicator._tick()
     assert indicator._display_level > silent_level
     speaking_image = indicator.grab().toImage()
-    for x in (146, 168, 190):
+    for x in (124, 146, 168, 190, 212):
         assert speaking_image.pixelColor(x, 74).red() > silent_image.pixelColor(x, 74).red() + 100
 
     indicator.set_state("TRANSCRIBING")

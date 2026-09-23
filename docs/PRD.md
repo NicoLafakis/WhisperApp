@@ -49,7 +49,7 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 | 3 | User opens **Settings** from the tray menu. | Settings dialog appears. |
 | 4 | User pastes an OpenAI API key and clicks **Test API Key**. | Dialog shows *"API Key Valid"* or *"API Key Error"*. |
 | 5 | User clicks **Save**. | Settings are persisted. Toast: *"Settings Updated"*. |
-| 6 | User holds **Ctrl+Shift+Space**. | The indicator immediately shows *"OPENING MIC"*. Once capture starts, three red voice-module columns respond to the microphone level while it shows *"RECORDING"*. |
+| 6 | User holds **Ctrl+Shift+Space**. | The indicator immediately shows *"OPENING MIC"*. Once capture starts, five red voice-module columns respond to the microphone level while it shows *"RECORDING"*. |
 | 7 | User releases the shortcut. | The indicator remains visible through *"SAVING"* and *"PROCESSING"*. Its LED columns animate as a work indicator, elapsed time advances, and GPT Transcribe may show a partial preview. A transient upload error changes the state to *"RETRYING"* until the next attempt. |
 | 8 | Transcription completes. | If the original target still has focus, text is pasted via `Ctrl+V`; otherwise the completed result is copied when automatic copy is enabled and remains available in Dictation History. Toast: *"Transcription Complete"* (if enabled). |
 | 9 | User right-clicks the tray icon and selects **Quit**. | App exits cleanly, releasing all hooks and audio resources. |
@@ -92,7 +92,7 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 - **FR-3.7** If no audio frames were captured, the app shall abort transcription and show a *"No Audio Recorded"* notification.
 - **FR-3.8** The audio recorder shall use `threading.Lock` for thread-safe start/stop and `threading.Event` for the recording loop.
 - **FR-3.9** Opening and stopping the audio device shall run outside the Qt UI thread. Hotkey press and release shall return to the UI immediately; a release received during device startup shall stop recording as soon as startup completes.
-- **FR-3.10** The indicator shall show explicit microphone opening, recording, saving, processing, queued, and retrying states. Three red LED columns shall respond to actual microphone level during recording. Non-recording work states shall animate separately and show elapsed time. The indicator shall remain visible until insertion, a recoverable text result, or failure is reported.
+- **FR-3.10** The indicator shall show explicit microphone opening, recording, saving, processing, queued, and retrying states. Five red LED columns shall respond to actual microphone level during recording. Non-recording work states shall animate separately and show elapsed time. The indicator shall remain visible until insertion, a recoverable text result, or failure is reported.
 - **FR-3.11** Completed-take retention scans shall not delay opening the microphone or finalizing audio.
 
 ### FR-4. Transcription
