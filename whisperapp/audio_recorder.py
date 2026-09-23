@@ -328,10 +328,6 @@ class AudioRecorder:
             self._hit_duration_limit = False
             self._finalized_path = None
             self.output_path = self.recordings_dir / f"recording_{uuid.uuid4().hex}.wav"
-            # Trim on the way in as well as on the way out: a crash or a kill between
-            # the two used to leave the folder growing with nothing ever pruning it.
-            self._cleanup_old_recordings()
-
             # Create a readable WAV before recording starts. writeframes patches the
             # header on each chunk; flush + fsync commits each captured chunk to disk.
             self._wav_file = self.output_path.open("w+b")
@@ -358,6 +354,9 @@ class AudioRecorder:
                 raise
             self._recording_thread = threading.Thread(target=self._record, daemon=True)
             self._recording_thread.start()
+            # Retention scans parse journals and touch the disk. Run them after the
+            # microphone is already capturing so a large history cannot delay onset.
+            threading.Thread(target=self._cleanup_old_recordings, daemon=True).start()
             logger.info("Recording started: %s", self.output_path.name)
 
     def _open_input_stream(self) -> None:
@@ -379,11 +378,14 @@ class AudioRecorder:
         while not self._stop_event.is_set() and self._stream is not None:
             try:
                 data = self._stream.read(self.chunk_size, exception_on_overflow=False)
+                # Update the UI-facing meter as soon as the device delivers a chunk.
+                # WAV flush/fsync can stall on slow laptop storage and must not make
+                # the live signal appear frozen.
+                self._update_volume_level(data)
                 self._frames.append(data)
                 self._wav_writer.writeframes(data)
                 self._wav_file.flush()
                 os.fsync(self._wav_file.fileno())
-                self._update_volume_level(data)
             except Exception:
                 # Device unplugged or stream closed under us: end the take, keep frames.
                 logger.warning("Audio capture or save failed; ending capture", exc_info=True)
@@ -502,7 +504,7 @@ class AudioRecorder:
         path = self.output_path
         DictationStore(self.recordings_dir).update(path, state="pending")
 
-        self._cleanup_old_recordings()
+        threading.Thread(target=self._cleanup_old_recordings, daemon=True).start()
         self._finalized_path = path
         logger.info("Recording saved: %s (%d frames)", path.name, sum(len(chunk) for chunk in frames) // (2 * self.channels))
         return path

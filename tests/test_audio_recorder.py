@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import time
 import wave
+import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -142,6 +143,59 @@ def test_recorder_under_the_cap_is_unaffected(make_recorder):
     assert recorder.hit_duration_limit is False
     assert path is not None
     assert _frame_count(path) > 0
+
+
+def test_recording_starts_before_retention_cleanup_finishes(make_recorder, monkeypatch):
+    """A folder scan must not sit in front of opening the microphone."""
+    recorder = make_recorder()
+    cleanup_started = threading.Event()
+    cleanup_release = threading.Event()
+
+    def slow_cleanup(*_args, **_kwargs):
+        cleanup_started.set()
+        cleanup_release.wait(2)
+
+    monkeypatch.setattr(recorder, "_cleanup_old_recordings", slow_cleanup)
+    try:
+        recorder.start_recording()
+        assert cleanup_started.wait(1)
+        assert recorder.is_recording
+        assert recorder._pyaudio.streams, "the audio stream should open before cleanup"
+    finally:
+        cleanup_release.set()
+
+
+def test_volume_meter_updates_before_slow_disk_sync(make_recorder, monkeypatch):
+    """Disk durability work must not postpone the visible microphone meter."""
+    import os
+
+    loud_chunk = (10000).to_bytes(2, "little", signed=True) * 1024
+    import whisperapp.audio_recorder as audio_module
+    from tests.conftest import FakePyAudioModule
+    fake_audio = FakePyAudioModule(chunk=loud_chunk, read_delay=0.002)
+    monkeypatch.setattr(audio_module, "pyaudio", fake_audio)
+    recorder = make_recorder()
+    entered_sync = threading.Event()
+    release_sync = threading.Event()
+    original_fsync = os.fsync
+    fsync_calls = 0
+
+    def blocked_fsync(fd):
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls > 1:  # first sync persists the recording journal at startup
+            entered_sync.set()
+            release_sync.wait(2)
+        return original_fsync(fd)
+
+    monkeypatch.setattr(audio_module.os, "fsync", blocked_fsync)
+    try:
+        recorder.start_recording()
+        assert entered_sync.wait(1)
+        assert recorder.get_volume_level() > 0.05
+    finally:
+        release_sync.set()
+        recorder.terminate()
 
 
 def test_stale_audio_device_is_refreshed_and_recording_retried(make_recorder, fake_pyaudio, monkeypatch):

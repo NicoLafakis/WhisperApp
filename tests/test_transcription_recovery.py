@@ -14,10 +14,15 @@ def tray(tmp_path):
     controller = WhisperTrayApp.__new__(WhisperTrayApp)
     QObject.__init__(controller)
     controller._is_recording = False
+    controller._is_starting = False
+    controller._is_stopping = False
+    controller._stop_after_start = False
+    controller._audio_thread = None
     controller._is_transcribing = False
     controller._last_recording = tmp_path / "recording_test.wav"
     controller._last_recording.write_bytes(b"saved audio")
     controller.retry_action = MagicMock()
+    controller.recording_indicator = MagicMock()
     controller.notify = MagicMock()
     controller.set_status = MagicMock()
     controller._report_failure = MagicMock()
@@ -74,10 +79,9 @@ def test_retry_missing_recording_is_reported(tray):
 
 def test_save_failure_does_not_leave_app_stuck_transcribing(tray):
     tray._is_recording = True
-    tray.recording_indicator = MagicMock()
-    tray.audio_recorder = MagicMock()
-    tray.audio_recorder.stop_recording.side_effect = OSError("disk full")
-    tray.on_hotkey_released()
+    tray._is_stopping = True
+    worker = type("FailedStop", (), {"operation": "stop", "error": OSError("disk full")})()
+    tray._on_audio_operation_finished(worker)
     assert not tray._is_recording
     assert not tray._is_transcribing
     tray.notify.assert_called_once()
@@ -97,3 +101,18 @@ def test_successful_transcription_is_automatically_inserted(tray):
     tray._on_transcription_finished(TranscriptionResult(text="Automatic dictation"))
     tray.text_inserter.insert_text.assert_called_once_with(text="Automatic dictation", auto_copy=True)
     tray.set_status.assert_called_with("Ready")
+
+
+def test_successful_text_goes_to_clipboard_when_focus_changed(tray):
+    tray.text_inserter.foreground_window.return_value = 999
+    tray.settings["auto_copy"] = True
+    tray._on_transcription_finished(TranscriptionResult(text="Newest dictation"))
+    tray.text_inserter.insert_text.assert_not_called()
+    tray.text_inserter.copy_text.assert_called_once_with("Newest dictation")
+
+
+def test_completed_text_replaces_clipboard_during_a_new_recording(tray):
+    tray._is_recording = True
+    tray.settings["auto_copy"] = True
+    tray._on_transcription_finished(TranscriptionResult(text="Earlier take result"))
+    tray.text_inserter.copy_text.assert_called_once_with("Earlier take result")

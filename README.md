@@ -42,10 +42,20 @@ New installations use `gpt-transcribe`. On first launch after upgrading, existin
 preferences. Settings offers `whisper-1` as a temporary manual fallback; that choice
 survives subsequent launches. Test API Key checks the selected model.
 
-The hotkey still records while held, then transcribes and pastes on release. The
-language selector now supplies the plural `languages` hint required by GPT Transcribe;
-Auto Detect omits the hint. This release does not add streaming or spoken responses.
-See [OpenAI file transcription](https://developers.openai.com/api/docs/guides/speech-to-text).
+The hotkey still records while held, then transcribes and pastes on release. Startup
+and save work runs off the UI thread; the on-screen Knight Rider scanner immediately
+shows whether the microphone is opening, recording, saving, or transcribing. For the
+default GPT Transcribe model, the overlay also shows partial text while OpenAI processes
+the completed recording. Partial text is only a preview; only the final result is
+inserted. `whisper-1` uses its normal non-streaming response. If automatic paste is
+skipped because focus changed, a completed result is copied to the clipboard when
+automatic copy is enabled. Failed transcription leaves the clipboard untouched and
+clearly reports that the audio is saved in Dictation History.
+
+The language selector supplies the plural `languages` hint required by GPT Transcribe;
+Auto Detect omits the hint. File transcription can stream partial text after the audio
+has been recorded and uploaded. Live transcription while the microphone is still
+capturing requires the separate Realtime API path. See [OpenAI file transcription](https://developers.openai.com/api/docs/guides/speech-to-text).
 
 Run regression checks with `python -m pytest -q`.
 

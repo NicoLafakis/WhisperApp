@@ -83,6 +83,29 @@ def test_successful_transcription_returns_text_and_no_error(service, fake_openai
     assert result.text == "hello world"
 
 
+def test_gpt_transcribe_streams_partial_text_after_recording(service, fake_openai, wav_path):
+    partials = []
+    fake_openai.audio.transcriptions.create.return_value = iter([
+        type("Delta", (), {"type": "transcript.text.delta", "delta": "Hello "})(),
+        type("Delta", (), {"type": "transcript.text.delta", "delta": "world"})(),
+        type("Done", (), {"type": "transcript.text.done", "text": "Hello world"})(),
+    ])
+
+    result = service.transcribe(wav_path, "gpt-transcribe", "en", on_partial=partials.append)
+
+    request = fake_openai.audio.transcriptions.create.call_args.kwargs
+    assert request["stream"] is True
+    assert partials == ["Hello ", "Hello world"]
+    assert result.text == "Hello world"
+
+
+def test_whisper_1_uses_non_streaming_request(service, fake_openai, wav_path):
+    fake_openai.audio.transcriptions.create.return_value = transcript("legacy result")
+    result = service.transcribe(wav_path, "whisper-1", "en", on_partial=lambda _text: None)
+    assert "stream" not in fake_openai.audio.transcriptions.create.call_args.kwargs
+    assert result.text == "legacy result"
+
+
 def test_quota_exhaustion_is_classified_as_quota_not_rate_limit(service, fake_openai, wav_path, quota_error):
     """The headline case: a 429 carrying insufficient_quota is NOT a plain rate limit.
 

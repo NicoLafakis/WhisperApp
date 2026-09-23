@@ -49,9 +49,9 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 | 3 | User opens **Settings** from the tray menu. | Settings dialog appears. |
 | 4 | User pastes an OpenAI API key and clicks **Test API Key**. | Dialog shows *"API Key Valid"* or *"API Key Error"*. |
 | 5 | User clicks **Save**. | Settings are persisted. Toast: *"Settings Updated"*. |
-| 6 | User holds **Ctrl+Shift+Space**. | Tray status changes to *"Recording..."*. Toast: *"Recording Started — Speak now..."*. Mic audio is captured. |
-| 7 | User releases the shortcut. | Recording stops. Status changes to *"Transcribing..."*. WAV is sent to OpenAI. |
-| 8 | Transcription completes. | Text is pasted into the focused field via `Ctrl+V`. Toast: *"Transcription Complete"* (if enabled). |
+| 6 | User holds **Ctrl+Shift+Space**. | The Knight Rider indicator and tray status immediately show *"Opening microphone..."*. Device startup runs off the UI thread; after it opens, the indicator changes to *"RECORDING"* and captured audio changes its glow. |
+| 7 | User releases the shortcut. | The indicator shows *"SAVING"* while audio finalization runs off the UI thread, then *"TRANSCRIBING"* while the WAV is sent to OpenAI. GPT Transcribe streams a text preview into the indicator as it processes the completed recording. |
+| 8 | Transcription completes. | If the original target still has focus, text is pasted via `Ctrl+V`; otherwise the completed result is copied when automatic copy is enabled and remains available in Dictation History. Toast: *"Transcription Complete"* (if enabled). |
 | 9 | User right-clicks the tray icon and selects **Quit**. | App exits cleanly, releasing all hooks and audio resources. |
 
 ---
@@ -85,12 +85,15 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 - **FR-3.1** The default hotkey shall be `Ctrl+Shift+Space`.
 - **FR-3.2** Recording shall start when `space` is pressed while `ctrl` and `shift` are held.
 - **FR-3.3** Recording shall stop when `space` is released.
-- **FR-3.4** The app shall prevent concurrent recordings: if already recording or transcribing, the hotkey press shall be ignored.
+- **FR-3.4** The app shall prevent concurrent audio captures while allowing a new recording to begin while an earlier recording is being transcribed.
 - **FR-3.5** Audio shall be captured as:
   - Mono, 16-bit PCM (`paInt16`), 16 kHz sample rate, 1024-frame buffer.
 - **FR-3.6** Recorded audio shall be written to `%TEMP%\whisperapp\recording.wav`.
 - **FR-3.7** If no audio frames were captured, the app shall abort transcription and show a *"No Audio Recorded"* notification.
 - **FR-3.8** The audio recorder shall use `threading.Lock` for thread-safe start/stop and `threading.Event` for the recording loop.
+- **FR-3.9** Opening and stopping the audio device shall run outside the Qt UI thread. Hotkey press and release shall return to the UI immediately; a release received during device startup shall stop recording as soon as startup completes.
+- **FR-3.10** The recording indicator shall show explicit `STARTING`, `RECORDING`, `SAVING`, and `TRANSCRIBING` states with a continuously sweeping red scanner. Microphone level shall affect its glow without stopping the scanner in silence.
+- **FR-3.11** Completed-take retention scans shall not delay opening the microphone or finalizing audio.
 
 ### FR-4. Transcription
 
@@ -103,6 +106,8 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 - **FR-4.4** If the API key is not configured, the worker shall return `"Error: API key not configured"`.
 - **FR-4.5** Any API or network exception shall be caught and returned as `"Error: {exception}"`.
 - **FR-4.6** The main thread shall receive the result via a `pyqtSignal(str)`.
+- **FR-4.7** For GPT Transcribe, the app shall display streamed text deltas while the service processes the uploaded, completed recording. The partial text is a preview; only the final result is saved as completed and eligible for paste. `whisper-1` continues to use a non-streaming request.
+- **FR-4.8** This file-upload flow does not provide live transcription while the microphone is recording. That requires a separate Realtime API implementation.
 
 ### FR-5. Text Insertion
 
@@ -113,6 +118,7 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
   4. Simulate `Ctrl+V` via the `keyboard` module.
 - **FR-5.2** If the result is empty or starts with `"Error:"`, the app shall show a *"Transcription Error"* notification and skip insertion.
 - **FR-5.3** The insertion is best-effort; the app does not guarantee focus has not shifted.
+- **FR-5.4** If a successful transcript is not pasted because focus changed, it shall replace the clipboard when automatic copy is enabled. A failed transcript shall leave the clipboard unchanged and clearly report that the audio is saved in Dictation History, so an older clipboard value is not presented as the new result.
 
 ### FR-6. Settings Dialog
 
@@ -189,7 +195,7 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 
 ### 6.1 Performance
 
-- Hotkey-to-recording-start latency: ≤ 200 ms.
+- The Qt UI shall show the `STARTING` indicator and return from hotkey handling within 200 ms. Physical microphone activation depends on the Windows audio device and driver; device open must not block the UI.
 - Transcription worker thread must not block the Qt event loop.
 - Audio buffer underruns shall be handled gracefully (`exception_on_overflow=False`).
 

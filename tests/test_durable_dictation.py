@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import wave
 
 import httpx
+import json
 import openai
 import pytest
 from PyQt5.QtWidgets import QApplication
@@ -200,7 +201,13 @@ def test_35_long_dictations_with_transport_reset_every_thirtieth(controller, mon
         calls += 1
         if calls % 30 == 0:
             raise httpx.ConnectError("[WinError 10054] An existing connection was forcibly closed by the remote host", request=request)
-        return httpx.Response(200, json={"text": f"Full paragraph from request {calls}"})
+        text = f"Full paragraph from request {calls}"
+        events = [
+            {"type": "transcript.text.delta", "delta": text},
+            {"type": "transcript.text.done", "text": text},
+        ]
+        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events) + "data: [DONE]\n\n"
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body.encode())
     tray.transcription_service._client = openai.OpenAI(
         api_key="test", max_retries=0,
         http_client=httpx.Client(transport=httpx.MockTransport(transport)),
@@ -221,6 +228,7 @@ def test_recording_is_accepted_while_previous_upload_is_running(controller):
     app, tray = controller
     tray._is_transcribing = True
     tray.on_hotkey_pressed()
+    pump(app, lambda: tray._audio_thread is not None and not tray._audio_thread.isRunning())
     tray.audio_recorder.start_recording.assert_called_once()
     assert tray._is_recording
 

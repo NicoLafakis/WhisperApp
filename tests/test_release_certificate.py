@@ -76,12 +76,19 @@ class ReleaseCertificateTests(unittest.TestCase):
         self.check_signer('b' * 40, ['b' * 40], required='a' * 40, should_pass=False)
 
     def test_release_verifier_rejects_unsigned_fixture(self):
+        module_check = subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+             '-Command', 'Get-AuthenticodeSignature -? | Out-Null'],
+            capture_output=True, text=True,
+        )
+        if module_check.returncode != 0:
+            self.skipTest('Microsoft.PowerShell.Security is unavailable in this PowerShell host')
         with tempfile.TemporaryDirectory() as directory:
             fixture = pathlib.Path(directory) / 'unsigned.exe'
             fixture.write_bytes(b'MZ' + b'\0' * 64)
             verifier = ROOT / 'scripts' / 'Verify-Release.ps1'
             result = subprocess.run([
-                'powershell', '-NoProfile', '-NonInteractive', '-File', str(verifier),
+                'powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(verifier),
                 '-Path', str(fixture), '-SignToolPath', 'signtool.exe',
                 '-BuildStarted', '2000-01-01T00:00:00Z', '-ReleaseThumbprint', 'A' * 40,
             ], capture_output=True, text=True)
@@ -94,7 +101,7 @@ class ReleaseCertificateTests(unittest.TestCase):
             fixture = pathlib.Path(directory) / 'unsigned.exe'
             fixture.write_bytes(b'MZ' + b'\0' * 64)
             missing = subprocess.run([
-                'powershell', '-NoProfile', '-NonInteractive', '-File', str(verifier),
+                'powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(verifier),
                 '-Path', str(pathlib.Path(directory) / 'missing.exe'), '-SignToolPath', 'unused',
                 '-BuildStarted', '2000-01-01T00:00:00Z', '-ReleaseThumbprint', 'A' * 40,
             ], capture_output=True, text=True)
@@ -102,7 +109,7 @@ class ReleaseCertificateTests(unittest.TestCase):
             self.assertIn('Required release artifact missing', missing.stderr)
 
             stale = subprocess.run([
-                'powershell', '-NoProfile', '-NonInteractive', '-File', str(verifier),
+                'powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(verifier),
                 '-Path', str(fixture), '-SignToolPath', 'unused',
                 '-BuildStarted', '2999-01-01T00:00:00Z', '-ReleaseThumbprint', 'A' * 40,
             ], capture_output=True, text=True)

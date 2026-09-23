@@ -97,13 +97,16 @@ def test_starting_a_take_prunes_only_completed_audio(fake_pyaudio, tmp_path):
             )
             DictationStore(recorder.recordings_dir).complete(path, f"Finished dictation {index}")
 
-        # The prune runs when a take starts, so the directory is trimmed before the
-        # new WAV lands - assert on that moment rather than after the take is written.
+        # Retention runs in the background, after microphone startup has begun.
         recorder.start_recording()
 
-        survivors = _names(recorder.recordings_dir)
-        expected = {f"recording_{index:02d}.wav" for index in range(30 - 25, 30)}
+        # The retention cap includes the active take, leaving 24 completed WAVs.
+        expected = {f"recording_{index:02d}.wav" for index in range(30 - 24, 30)}
         expected.add(recorder.output_path.name)
+        deadline = time.monotonic() + 2
+        while _names(recorder.recordings_dir) != expected and time.monotonic() < deadline:
+            time.sleep(0.01)
+        survivors = _names(recorder.recordings_dir)
         assert survivors == expected, "pruning did not keep completed audio plus the active take"
         assert len(list(recorder.recordings_dir.glob("*.txt"))) == 30
 

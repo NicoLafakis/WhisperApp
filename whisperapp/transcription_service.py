@@ -216,7 +216,13 @@ class TranscriptionService:
 
         return TranscriptionResult(message="API key is valid and can transcribe audio.")
 
-    def transcribe(self, wav_path: Path, model: str, language: str) -> TranscriptionResult:
+    def transcribe(
+        self,
+        wav_path: Path,
+        model: str,
+        language: str,
+        on_partial=None,
+    ) -> TranscriptionResult:
         if self._client is None:
             return TranscriptionResult(
                 error_kind=TranscriptionErrorKind.NOT_CONFIGURED,
@@ -240,6 +246,21 @@ class TranscriptionService:
                         kwargs["extra_body"] = {"languages": [language]}
                     else:
                         kwargs["language"] = language
+                if model == DEFAULT_TRANSCRIPTION_MODEL and on_partial is not None:
+                    # The newer transcription models can stream progress once the
+                    # completed WAV is uploaded. Whisper-1 does not support this API.
+                    kwargs["stream"] = True
+                    transcript = self._client.audio.transcriptions.create(**kwargs)
+                    partial_text = ""
+                    final_text = ""
+                    for event in transcript:
+                        event_type = getattr(event, "type", "")
+                        if event_type == "transcript.text.delta":
+                            partial_text += getattr(event, "delta", "") or ""
+                            on_partial(partial_text)
+                        elif event_type == "transcript.text.done":
+                            final_text = getattr(event, "text", "") or partial_text
+                    return TranscriptionResult(text=final_text.strip())
                 transcript = self._client.audio.transcriptions.create(**kwargs)
         except Exception as exc:
             kind, message = classify_error(exc)
