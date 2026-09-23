@@ -1,9 +1,10 @@
 ﻿from __future__ import annotations
 
 import logging
+import threading
 from typing import Dict, List, Tuple
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -29,6 +30,27 @@ from whisperapp.transcription_service import (
 
 
 logger = logging.getLogger(__name__)
+_ACTIVE_CHECK_THREADS = set()
+_ACTIVE_CHECK_LOCK = threading.Lock()
+
+
+class _ApiKeyCheckWorker(QObject):
+    completed = pyqtSignal(object)
+
+    def __init__(self, service, api_key: str, model: str) -> None:
+        super().__init__()
+        self.service = service
+        self.api_key = api_key
+        self.model = model
+
+    @pyqtSlot()
+    def run(self) -> None:
+        try:
+            result = self.service.test_api_key(self.api_key, model=self.model)
+        except Exception as exc:
+            logger.exception("API key check worker failed")
+            result = exc
+        self.completed.emit(result)
 
 
 LANGUAGE_OPTIONS: List[Tuple[str, str]] = [
@@ -56,6 +78,10 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self._service = transcription_service
         self._settings = settings
+        self._check_thread = None
+        self._check_worker = None
+        self._cursor_overridden = False
+        self._closing = False
 
         self.setWindowTitle("WhisperApp Settings")
         self.setMinimumWidth(440)
@@ -143,6 +169,8 @@ class SettingsDialog(QDialog):
         layout.addLayout(actions)
 
     def _test_api_key(self) -> None:
+        if self._check_thread is not None:
+            return
         api_key = self.api_key_input.text().strip()
         if not api_key:
             QMessageBox.warning(self, "API Key Error", "Please enter an API key.")
@@ -151,12 +179,33 @@ class SettingsDialog(QDialog):
         self.test_button.setEnabled(False)
         self.test_button.setText("Testing...")
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            result = self._service.test_api_key(api_key, model=self.model_combo.currentText())
-        finally:
+        self._cursor_overridden = True
+        thread = QThread()
+        worker = _ApiKeyCheckWorker(self._service, api_key, self.model_combo.currentText())
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._api_key_check_completed)
+        worker.completed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda t=thread: self._api_key_check_finished(t))
+        self._check_thread = thread
+        self._check_worker = worker
+        with _ACTIVE_CHECK_LOCK:
+            _ACTIVE_CHECK_THREADS.add(thread)
+        thread.start()
+
+    @pyqtSlot(object)
+    def _api_key_check_completed(self, result) -> None:
+        if self._cursor_overridden:
             QApplication.restoreOverrideCursor()
-            self.test_button.setEnabled(True)
-            self.test_button.setText("Test API Key")
+            self._cursor_overridden = False
+        self.test_button.setEnabled(True)
+        self.test_button.setText("Test API Key")
+        if self._closing:
+            return
+        if isinstance(result, Exception):
+            QMessageBox.critical(self, "API Key Error", "The API key check failed. See the application log for details.")
+            return
 
         if result.ok:
             QMessageBox.information(
@@ -173,6 +222,28 @@ class SettingsDialog(QDialog):
         if result.error_kind is TranscriptionErrorKind.QUOTA_EXHAUSTED:
             detail = f"{detail}\n\nAdd credits at:\n{BILLING_URL}"
         QMessageBox.critical(self, title, detail)
+
+    def closeEvent(self, event) -> None:
+        self._closing = True
+        self._restore_wait_cursor()
+        super().closeEvent(event)
+
+    def done(self, result: int) -> None:
+        self._closing = True
+        self._restore_wait_cursor()
+        super().done(result)
+
+    def _restore_wait_cursor(self) -> None:
+        if self._cursor_overridden:
+            QApplication.restoreOverrideCursor()
+            self._cursor_overridden = False
+
+    def _api_key_check_finished(self, thread) -> None:
+        with _ACTIVE_CHECK_LOCK:
+            _ACTIVE_CHECK_THREADS.discard(thread)
+        if self._check_thread is thread:
+            self._check_thread = None
+            self._check_worker = None
 
     def get_settings(self) -> Dict[str, object]:
         return {

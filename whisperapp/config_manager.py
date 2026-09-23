@@ -1,5 +1,9 @@
 ﻿import json
+import logging
 import os
+import shutil
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -7,6 +11,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 
 DEFAULT_TRANSCRIPTION_MODEL = "gpt-transcribe"
+logger = logging.getLogger(__name__)
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "api_key": "",
@@ -45,6 +50,8 @@ class ConfigManager:
             return settings
         try:
             data = json.loads(self.config_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("top-level JSON value must be an object")
             settings = dict(DEFAULT_SETTINGS)
             settings.update(data)
             # Migrate the old default once; a later explicit fallback choice survives.
@@ -54,15 +61,44 @@ class ConfigManager:
                 settings["transcription_model_migration"] = 1
                 self._write_settings(settings)
             return settings
-        except (json.JSONDecodeError, OSError):
-            settings = dict(DEFAULT_SETTINGS)
-            self._write_settings(settings)
-            return settings
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
+            self._preserve_invalid_settings()
+            logger.warning(
+                "Settings file is invalid or unreadable; using defaults in memory (%s)",
+                type(exc).__name__,
+            )
+            return dict(DEFAULT_SETTINGS)
+
+    def _preserve_invalid_settings(self) -> None:
+        if not self.config_path.exists():
+            return
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup = self.config_dir / f"config.invalid-{stamp}.json"
+        try:
+            shutil.copy2(self.config_path, backup)
+            logger.warning("Preserved invalid settings file at %s", backup)
+        except OSError as exc:
+            logger.error("Could not preserve invalid settings file (%s)", type(exc).__name__)
 
     def _write_settings(self, settings: Dict[str, Any]) -> None:
-        self.config_path.write_text(
-            json.dumps(settings, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        payload = json.dumps(settings, indent=2, sort_keys=True)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=self.config_dir,
+                prefix="config.", suffix=".tmp", delete=False,
+            ) as stream:
+                temp_path = Path(stream.name)
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_path, self.config_path)
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Could not remove temporary settings file")
 
     def _encrypt(self, value: str) -> str:
         return self._fernet.encrypt(value.encode("utf-8")).decode("utf-8")
@@ -93,8 +129,8 @@ class ConfigManager:
             api_key = (settings.get("api_key") or "").strip()
             updated["api_key"] = self._encrypt(api_key) if api_key else ""
 
+        self._write_settings(updated)
         self._settings = updated
-        self._write_settings(self._settings)
 
     def get_api_key(self) -> str:
         encrypted = self._settings.get("api_key", "")

@@ -1,69 +1,55 @@
-<#
+﻿<#
 .SYNOPSIS
-    Generates and installs a local development Code Signing certificate for WhisperApp.
+    Creates a local WhisperApp development signing certificate.
 .DESCRIPTION
-    Creates a self-signed X.509 code-signing certificate (SHA256, RSA 2048-bit),
-    stores it in Cert:\CurrentUser\My, and registers it in TrustedPeople & TrustedPublisher.
-    This enables Windows, SmartScreen, and Antivirus scanners (e.g. McAfee) to verify
-    the Authenticode signature on locally built executables and installers.
+    The certificate is created in Cert:\CurrentUser\My. Trust-store changes are opt-in.
+    -InstallTrust additionally modifies Cert:\CurrentUser\TrustedPeople and
+    Cert:\CurrentUser\TrustedPublisher. Remove those copies and the My copy by
+    thumbprint with Remove-Item Cert:\CurrentUser\<Store>\<Thumbprint>.
 #>
-
 param(
     [string]$Subject = "CN=WhisperApp Developer, O=WhisperApp",
     [int]$ValidityYears = 5,
-    [string]$CerExportPath = "$PSScriptRoot\..\assets\WhisperApp-Dev.cer"
+    [string]$CerExportPath,
+    [switch]$InstallTrust
 )
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "Checking for existing WhisperApp Code Signing certificate..." -ForegroundColor Cyan
-
-$existingCert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object { $_.Subject -like "*CN=WhisperApp*" } | Select-Object -First 1
+# Avoid the -CodeSigningCert provider parameter, which is not available in all
+# supported Windows PowerShell versions.
+$existingCert = Get-ChildItem -Path Cert:\CurrentUser\My | Where-Object {
+    $_.Subject -like "*CN=WhisperApp*" -and $_.HasPrivateKey -and
+    @($_.EnhancedKeyUsageList | Where-Object { $_.ObjectId.Value -eq '1.3.6.1.5.5.7.3.3' }).Count -gt 0
+} | Select-Object -First 1
 
 if ($existingCert) {
-    Write-Host "Found existing certificate: $($existingCert.Thumbprint) ($($existingCert.Subject))" -ForegroundColor Green
     $cert = $existingCert
 } else {
-    Write-Host "Generating new self-signed Code Signing certificate..." -ForegroundColor Yellow
-    $cert = New-SelfSignedCertificate `
-        -Type CodeSigningCert `
-        -Subject $Subject `
-        -CertStoreLocation "Cert:\CurrentUser\My" `
-        -HashAlgorithm "SHA256" `
-        -KeyLength 2048 `
-        -NotAfter (Get-Date).AddYears($ValidityYears)
-    Write-Host "Created certificate: $($cert.Thumbprint)" -ForegroundColor Green
+    $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $Subject `
+        -CertStoreLocation "Cert:\CurrentUser\My" -HashAlgorithm "SHA256" `
+        -KeyLength 2048 -NotAfter (Get-Date).AddYears($ValidityYears)
 }
 
-# Trust in CurrentUser\TrustedPeople and CurrentUser\TrustedPublisher
-$stores = @("TrustedPeople", "TrustedPublisher")
-foreach ($storeName in $stores) {
-    try {
+if ($InstallTrust) {
+    foreach ($storeName in @("TrustedPeople", "TrustedPublisher")) {
         $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($storeName, "CurrentUser")
-        $store.Open("ReadWrite")
-        $exists = $store.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
-        if (-not $exists) {
-            $store.Add($cert)
-            Write-Host "Added certificate to Cert:\CurrentUser\$storeName" -ForegroundColor Green
-        } else {
-            Write-Host "Certificate already present in Cert:\CurrentUser\$storeName" -ForegroundColor Gray
+        try {
+            $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+            if (-not ($store.Certificates | Where-Object Thumbprint -eq $cert.Thumbprint)) {
+                $store.Add($cert)
+            }
+        } finally {
+            $store.Close()
         }
-        $store.Close()
-    } catch {
-        Write-Warning "Could not add to store ${storeName}: $_"
     }
+    Write-Warning "Installed in CurrentUser\TrustedPeople and CurrentUser\TrustedPublisher. Remove by thumbprint from both stores to undo."
 }
 
-# Export public .cer
 if ($CerExportPath) {
     $cerDir = Split-Path -Parent $CerExportPath
-    if (-not (Test-Path $cerDir)) {
-        New-Item -ItemType Directory -Path $cerDir -Force | Out-Null
-    }
+    if ($cerDir -and -not (Test-Path $cerDir)) { New-Item -ItemType Directory -Path $cerDir -Force | Out-Null }
     Export-Certificate -Cert $cert -FilePath $CerExportPath -Force | Out-Null
-    Write-Host "Exported public certificate to: $CerExportPath" -ForegroundColor Green
 }
-
-Write-Host "`nThumbprint: $($cert.Thumbprint)" -ForegroundColor Cyan
-Write-Host "Subject:    $($cert.Subject)" -ForegroundColor Cyan
+Write-Host "Development certificate: $($cert.Thumbprint) ($($cert.Subject))"
 return $cert.Thumbprint

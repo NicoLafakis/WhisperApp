@@ -4,7 +4,7 @@
 .DESCRIPTION
     Signs .exe files using Microsoft SignTool (signtool.exe), applying SHA256 hashing
     and a trusted RFC 3161 timestamp (DigiCert). This complies with Windows Authenticode
-    security standards and prevents antivirus heuristic blocking.
+    integrity checks. Signing does not guarantee antivirus or Smart App Control acceptance.
 .PARAMETER FilePath
     Path or array of paths to .exe or .dll files to sign.
 .PARAMETER Thumbprint
@@ -18,13 +18,14 @@
 #>
 
 param(
-    [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+    [Parameter(ValueFromPipeline=$true)]
     [string[]]$FilePath,
 
     [string]$Thumbprint,
     [string]$PfxPath,
     [string]$PfxPassword,
-    [string]$TimestampServer = "http://timestamp.digicert.com"
+    [string]$TimestampServer = "http://timestamp.digicert.com",
+    [switch]$ValidateCertificateOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,27 +51,34 @@ function Find-SignTool {
     throw "signtool.exe not found. Please install Windows 10/11 SDK or App Certification Kit."
 }
 
+. (Join-Path $PSScriptRoot 'Release-Signing.ps1')
+if ((-not $PfxPath -and -not $Thumbprint) -or ($PfxPath -and $Thumbprint)) {
+    throw 'Specify exactly one publicly trusted release certificate using -Thumbprint or -PfxPath. Development certificates are not accepted.'
+}
+if ($PfxPath) {
+    $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+    try {
+        $cert.Import((Resolve-Path -LiteralPath $PfxPath).Path, $PfxPassword, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+        Assert-ReleaseCertificate $cert
+    } finally {
+        $cert.Dispose()
+    }
+} else {
+    $Thumbprint = $Thumbprint.Replace(' ', '')
+    if ($Thumbprint -notmatch '^[A-Fa-f0-9]{40}$') { throw 'Invalid certificate thumbprint.' }
+    $cert = Get-Item -LiteralPath "Cert:\CurrentUser\My\$Thumbprint" -ErrorAction Stop
+    Assert-ReleaseCertificate $cert
+}
+if ($ValidateCertificateOnly) { return }
+if (-not $FilePath) { throw 'At least one file is required for signing.' }
+if (-not $TimestampServer) { throw 'A timestamp server is required for release signing.' }
 $signtool = Find-SignTool
 Write-Host "Using SignTool: $signtool" -ForegroundColor Cyan
 
-# Resolve certificate if not specified
-if (-not $PfxPath -and -not $Thumbprint) {
-    $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object { $_.Subject -like "*CN=WhisperApp*" } | Select-Object -First 1
-    if (-not $cert) {
-        Write-Host "No existing WhisperApp Code Signing certificate found. Creating dev certificate..." -ForegroundColor Yellow
-        $scriptPath = Join-Path $PSScriptRoot "Create-DevCert.ps1"
-        $Thumbprint = & $scriptPath
-    } else {
-        $Thumbprint = $cert.Thumbprint
-        Write-Host "Using existing certificate: $Thumbprint ($($cert.Subject))" -ForegroundColor Green
-    }
-}
-
 foreach ($target in $FilePath) {
-    $resolvedPath = Resolve-Path $target -ErrorAction SilentlyContinue
+    $resolvedPath = Resolve-Path -LiteralPath $target -ErrorAction Stop
     if (-not $resolvedPath -or -not (Test-Path $resolvedPath)) {
-        Write-Warning "File not found: $target"
-        continue
+        throw "File not found: $target"
     }
 
     Write-Host "`nSigning: $resolvedPath" -ForegroundColor Cyan
@@ -99,6 +107,11 @@ foreach ($target in $FilePath) {
 
     # Verify signature
     $sig = Get-AuthenticodeSignature $resolvedPath.Path
+    if ($sig.Status -ne 'Valid' -or -not $sig.TimeStamperCertificate) {
+        throw "Release signature verification failed or timestamp missing: $resolvedPath ($($sig.Status))"
+    }
+    & $signtool verify /pa /all /v $resolvedPath.Path
+    if ($LASTEXITCODE -ne 0) { throw "SignTool verification failed: $resolvedPath" }
     Write-Host "Signed successfully:" -ForegroundColor Green
     Write-Host "  Signer: $($sig.SignerCertificate.Subject)"
     Write-Host "  Status: $($sig.Status) ($($sig.StatusMessage))"

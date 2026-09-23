@@ -1,11 +1,11 @@
-; WhisperApp Inno Setup Installer Script
+﻿; WhisperApp Inno Setup Installer Script
 ; Requires Inno Setup 6.x (https://jrsoftware.org/isinfo.php)
 ; Usage: Compile with ISCC.exe installer.iss
 
 #define MyAppName "WhisperApp"
 #define MyAppVersion "1.1.0"
 #define MyAppPublisher "WhisperApp"
-#define MyAppExeName "WhisperApp.exe"
+#define MyAppExeName "WhisperApp\WhisperApp.exe"
 #define MyAppMutex "WhisperApp-SingleInstance-0f6b1c94b7d24e0a,Local\WhisperApp-SingleInstance-0f6b1c94b7d24e0a"
 
 [Setup]
@@ -42,7 +42,10 @@ AppMutex={#MyAppMutex}
 CloseApplications=yes
 CloseApplicationsFilter=*.exe
 RestartApplications=no
-
+#ifdef ReleaseSigning
+SignedUninstaller=yes
+SignTool=WhisperAppRelease
+#endif
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
@@ -51,7 +54,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startup"; Description: "Start WhisperApp on Windows login"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\BUILD-INFO.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\{#MyAppName}\*"; DestDir: "{app}\{#MyAppName}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

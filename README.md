@@ -51,15 +51,22 @@ Run regression checks with `python -m pytest -q`.
 
 ## Build & Packaging
 
-Build the executable and digitally signed Inno Setup installer:
+Build an unsigned development copy:
 
 ```powershell
-.\build.ps1 -Clean -SkipInstall -Installer -Sign
+.\build.ps1 -Clean -SkipInstall
 ```
 
-This builds `dist/WhisperApp.exe`, compiles `installer/WhisperApp-Setup-1.1.0.exe`, and signs both with Authenticode SHA256 and RFC 3161 timestamps to satisfy Windows security standards and prevent antivirus (McAfee, Defender) false positives. See [Windows Security & Antivirus Guide](docs/WINDOWS_SECURITY_AND_ANTIVIRUS.md) for certificate configuration, trust setup, and false positive procedures.
+Run `dist\WhisperApp\WhisperApp.exe`. The build is labeled as an unsigned development artifact.
 
-Quit any running tray instance before launching the new `dist/WhisperApp.exe`; the single-instance guard prevents two copies running.
+Build and verify a signed release candidate (requires Inno Setup, SignTool, and a publicly trusted RSA signing identity):
+
+```powershell
+.\build.ps1 -Release -SkipInstall -Installer -Sign -Thumbprint YOUR_PUBLICLY_TRUSTED_CERTIFICATE_THUMBPRINT
+```
+
+Release mode signs and verifies each shipped native PE binary, the installer, the generated uninstaller, and all installed native files. It cleans prior outputs and fails closed if required tools, credentials, timestamps, signatures, or fresh artifacts are missing. It packages an onedir build so native files can be inspected individually. Signing does not guarantee antivirus or Smart App Control acceptance. See [Windows release signing guide](docs/WINDOWS_SECURITY_AND_ANTIVIRUS.md) for the Windows manual checklist and signing details.
+
+Quit any running tray instance before launching the new executable; the single-instance guard prevents two copies running.
 
 The Windows voice-command proposal is in [Jarvis proposal](docs/JARVIS_PROPOSAL.md).
-

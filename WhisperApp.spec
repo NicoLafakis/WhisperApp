@@ -59,9 +59,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name=APP_NAME,
     debug=False,
     bootloader_ignore_signals=False,
@@ -78,4 +77,16 @@ exe = EXE(
     icon='assets\\icon.ico',
     version='version_info.txt',
     manifest='assets\\WhisperApp.manifest',
+)
+
+# Onedir is required for release signing: each shipped native PE must be signed
+# before Inno Setup packages it. Onefile embeds these files in an opaque archive.
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name=APP_NAME,
 )
