@@ -24,3 +24,12 @@ def test_held_shortcut_modifiers_do_not_generate_wrong_paste(monkeypatch):
     assert not module.TextInserter().insert_text("recoverable dictation", True)
     copy.assert_called_once_with("recoverable dictation")
     paste.assert_not_called()
+
+
+def test_live_typing_sends_unicode_without_releasing_held_hotkey(monkeypatch):
+    typed = []
+    os_keyboard = type("OSKeyboard", (), {"type_unicode": staticmethod(typed.append)})()
+    monkeypatch.setattr(module.os, "name", "nt")
+    monkeypatch.setattr(module.keyboard, "_os_keyboard", os_keyboard, raising=False)
+    assert module.TextInserter.type_text("hello é")
+    assert typed == list("hello é")

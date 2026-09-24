@@ -50,8 +50,8 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 | 4 | User pastes an OpenAI API key and clicks **Test API Key**. | Dialog shows *"API Key Valid"* or *"API Key Error"*. |
 | 5 | User clicks **Save**. | Settings are persisted. Toast: *"Settings Updated"*. |
 | 6 | User holds **Ctrl+Shift+Space**. | The indicator immediately shows *"OPENING MIC"*. Once capture starts, five red voice-module columns respond to the microphone level while it shows *"RECORDING"*. |
-| 7 | User releases the shortcut. | The indicator remains visible through *"SAVING"* and *"PROCESSING"*. Its LED columns animate as a work indicator, elapsed time advances, and GPT Transcribe may show a partial preview. A transient upload error changes the state to *"RETRYING"* until the next attempt. |
-| 8 | Transcription completes. | If the original target still has focus, text is pasted via `Ctrl+V`; otherwise the completed result is copied when automatic copy is enabled and remains available in Dictation History. Toast: *"Transcription Complete"* (if enabled). |
+| 7 | User pauses while speaking. | Realtime transcription commits a phrase after a brief silence and types the finalized phrase into the original target while recording continues. |
+| 8 | User releases the shortcut. | The app finalizes the recording and transcript. The compact, movable meter shows a short completion or recovery status. The completed transcript is saved in Dictation History and copied when automatic copy is enabled. |
 | 9 | User right-clicks the tray icon and selects **Quit**. | App exits cleanly, releasing all hooks and audio resources. |
 
 ---
@@ -93,13 +93,13 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 - **FR-3.7** If no audio frames were captured, the app shall abort transcription and show a *"No Audio Recorded"* notification.
 - **FR-3.8** The audio recorder shall use `threading.Lock` for thread-safe start/stop and `threading.Event` for the recording loop.
 - **FR-3.9** Opening and stopping the audio device shall run outside the Qt UI thread. Hotkey press and release shall return to the UI immediately; a release received during device startup shall stop recording as soon as startup completes.
-- **FR-3.10** The indicator shall show explicit microphone opening, recording, saving, processing, queued, and retrying states. Five red LED columns shall respond to actual microphone level during recording. Non-recording work states shall animate separately and show elapsed time. The indicator shall remain visible until insertion, a recoverable text result, or failure is reported.
+- **FR-3.10** The compact indicator shall open near the top-right of the active screen, remain draggable within screen bounds, and remember its last position. Five red LED columns shall respond to actual microphone level during recording. It shall show concise recording, finishing, fallback, and completion states without covering a large portion of the target window.
 - **FR-3.11** Fresh pending dictations shall be transcribed before older due retries, with a foreground worker that can run while an older retry remains in flight. Background retries shall wait during active capture; all saved recordings remain durable for later retry.
 - **FR-3.12** Completed-take retention scans shall not delay opening the microphone or finalizing audio.
 
 ### FR-4. Transcription
 
-- **FR-4.1** Transcription shall run on a `QThread` worker to keep the UI responsive.
+- **FR-4.1** Live transcription shall stream captured PCM audio through a Realtime WebSocket worker; file transcription and recovery shall run on a worker thread to keep the UI responsive.
 - **FR-4.2** The app shall use the OpenAI Python SDK with an `httpx.Client(timeout=60.0)`.
 - **FR-4.3** The request shall include:
   - `model` (from settings)
@@ -108,18 +108,14 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 - **FR-4.4** If the API key is not configured, the worker shall return `"Error: API key not configured"`.
 - **FR-4.5** Any API or network exception shall be caught and returned as `"Error: {exception}"`.
 - **FR-4.6** The main thread shall receive the result via a `pyqtSignal(str)`.
-- **FR-4.7** For GPT Transcribe, the app shall display streamed text deltas while the service processes the uploaded, completed recording. The partial text is a preview; only the final result is saved as completed and eligible for paste. `whisper-1` continues to use a non-streaming request.
-- **FR-4.8** This file-upload flow does not provide live transcription while the microphone is recording. Live partial text is possible through a separate Realtime transcription session and requires its own audio streaming, target-field update, and finalization behavior.
+- **FR-4.7** The app shall stream 16 kHz capture audio as 24 kHz PCM to a Realtime transcription session. It shall commit a phrase after approximately 550 ms of silence, order completed phrases by audio-buffer item, and insert only finalized phrases. It shall commit the final phrase when capture stops.
+- **FR-4.8** The app shall continue writing and journaling the WAV while Realtime is active. If Realtime fails before any text is typed, it shall use the saved WAV and the configured file-transcription model. If live phrases were already typed, fallback may update History and the clipboard but shall not paste the transcript again.
 
 ### FR-5. Text Insertion
 
-- **FR-5.1** On successful transcription, the app shall:
-  1. Copy the text to the clipboard (if `auto_copy` is enabled).
-  2. Wait 100 ms.
-  3. Copy the text to the clipboard again.
-  4. Simulate `Ctrl+V` via the `keyboard` module.
+- **FR-5.1** Before typing each finalized phrase, the app shall confirm that the originally focused top-level window remains active. It shall type Unicode without releasing the held push-to-talk modifiers. If no phrase was typed, the final result may be inserted once after capture ends. The completed transcript shall be copied when `auto_copy` is enabled.
 - **FR-5.2** If the result is empty or starts with `"Error:"`, the app shall show a *"Transcription Error"* notification and skip insertion.
-- **FR-5.3** The insertion is best-effort; the app does not guarantee focus has not shifted.
+- **FR-5.3** If focus changes during capture, the app shall stop inserting into other windows and retain the full transcript in Dictation History.
 - **FR-5.4** If a successful transcript is not pasted because focus changed, it shall replace the clipboard when automatic copy is enabled. A failed transcript shall leave the clipboard unchanged and clearly report that the audio is saved in Dictation History, so an older clipboard value is not presented as the new result.
 
 ### FR-6. Settings Dialog

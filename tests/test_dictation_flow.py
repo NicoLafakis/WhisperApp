@@ -141,7 +141,7 @@ def test_release_during_startup_is_deferred_until_microphone_is_ready(monkeypatc
         app.aboutToQuit.disconnect(controller.cleanup)
 
 
-def test_voice_modulator_responds_to_input_and_processing_animates_without_audio():
+def test_voice_modulator_responds_to_input_and_processing_stays_unobtrusive():
     app = QApplication.instance() or QApplication([])
     volume = [0.0]
     indicator = main.RecordingIndicator(lambda: volume[0])
@@ -154,19 +154,15 @@ def test_voice_modulator_responds_to_input_and_processing_animates_without_audio
         indicator._tick()
     assert indicator._display_level > silent_level
     speaking_image = indicator.grab().toImage()
-    for x in (124, 146, 168, 190, 212):
-        assert speaking_image.pixelColor(x, 74).red() > silent_image.pixelColor(x, 74).red() + 100
+    for x in (187, 199, 211, 223, 235):
+        assert speaking_image.pixelColor(x, 43).red() > silent_image.pixelColor(x, 43).red() + 100
 
     indicator.set_state("TRANSCRIBING")
     indicator.set_partial_text("A partial result")
-    before = indicator._phase
     volume[0] = 0.0
     processing_image = indicator.grab().toImage()
     indicator._tick()
-    assert indicator._phase != before
-    for _ in range(6):
-        indicator._tick()
-    assert indicator.grab().toImage() != processing_image
+    assert indicator.grab().toImage() == processing_image
     assert indicator._state == "TRANSCRIBING"
     assert indicator._partial_text == "A partial result"
 
@@ -178,3 +174,45 @@ def test_new_processing_state_cancels_pending_terminal_hide():
     assert indicator._hide_timer.isActive()
     indicator.set_state("TRANSCRIBING")
     assert not indicator._hide_timer.isActive()
+
+
+def test_recording_indicator_is_compact_draggable_and_persists_position():
+    from PyQt5.QtCore import QPoint, Qt
+
+    app = QApplication.instance() or QApplication([])
+    positions = []
+    indicator = main.RecordingIndicator(on_position_changed=lambda x, y: positions.append((x, y)))
+    indicator.show_indicator()
+    app.processEvents()
+    assert indicator.size().width() <= 270
+    assert indicator.size().height() <= 64
+
+    class MouseEvent:
+        def __init__(self, global_pos, button=Qt.LeftButton):
+            self._global_pos = global_pos
+            self._button = button
+
+        def button(self):
+            return self._button
+
+        def buttons(self):
+            return Qt.LeftButton
+
+        def globalPos(self):
+            return self._global_pos
+
+        def accept(self):
+            pass
+
+    press_pos = indicator.frameGeometry().topLeft() + QPoint(16, 16)
+    move_pos = press_pos + QPoint(30, 30)
+    indicator.mousePressEvent(MouseEvent(press_pos))
+    indicator.mouseMoveEvent(MouseEvent(move_pos))
+    indicator.mouseReleaseEvent(MouseEvent(move_pos))
+    app.processEvents()
+    assert positions
+    assert positions[-1] == (indicator.x(), indicator.y())
+    assert indicator._clamp_position(-1000, -1000, app.primaryScreen().availableGeometry()) == QPoint(
+        app.primaryScreen().availableGeometry().left(), app.primaryScreen().availableGeometry().top()
+    )
+    indicator.close()

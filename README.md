@@ -11,8 +11,8 @@ Implemented baseline behavior:
 - API key encrypted with Fernet in `config.json`
 - Push-to-talk recording on `Ctrl+Shift+Space` (space press/release with ctrl+shift held)
 - WAV recording to `<Documents>\\WhisperApp\\recordings\\recording_<id>.wav` (last 25 kept)
-- GPT Transcribe dictation via `client.audio.transcriptions.create(...)`
-- Clipboard + synthetic `Ctrl+V` insertion flow
+- Realtime transcription while recording, with finalized phrases typed into the focused app
+- Durable WAV capture and file-transcription recovery if the live connection fails
 - Notification behavior aligned with recovered app
 
 ## Setup
@@ -42,22 +42,24 @@ New installations use `gpt-transcribe`. On first launch after upgrading, existin
 preferences. Settings offers `whisper-1` as a temporary manual fallback; that choice
 survives subsequent launches. Test API Key checks the selected model.
 
-The hotkey still records while held, then transcribes and pastes on release. Startup
-and save work runs off the UI thread. The on-screen KITT-style five-column voice
-module responds to microphone level while recording. After release it stays visible
-with an animated processing state, elapsed time, partial transcript preview (for GPT
-Transcribe), and automatic retry status until text is ready or the job fails. Partial
-text is only a preview; only the final result is inserted. `whisper-1` uses its normal
-non-streaming response. If automatic paste is
-skipped because focus changed, a completed result is copied to the clipboard when
-automatic copy is enabled. Failed transcription leaves the clipboard untouched and
-clearly reports that the audio is saved in Dictation History.
+The hotkey starts microphone capture and Realtime transcription together. Finalized
+speech phrases are typed into the app that was focused when recording began; a brief
+pause commits a phrase while recording continues. If focus changes, WhisperApp stops
+typing into other windows and keeps the transcript in Dictation History. A compact
+recording meter opens near the top-right of the active screen, can be dragged, and
+remembers its position. Automatic copy places the completed transcript on the clipboard
+when enabled.
 
-The language selector supplies the plural `languages` hint required by GPT Transcribe;
-Auto Detect omits the hint. File transcription can stream partial text after the audio
-has been recorded and uploaded. Live transcription while the microphone is still
-capturing is possible with a separate [Realtime transcription session](https://developers.openai.com/api/docs/guides/realtime-transcription);
-the current push-to-talk flow uses file transcription. See [OpenAI file transcription](https://developers.openai.com/api/docs/guides/speech-to-text).
+The app continues saving the WAV and journal during live transcription. If Realtime is
+unavailable or fails before any text was typed, the saved WAV uses the normal file
+transcription and insertion path. If some live phrases were already typed, fallback
+transcription updates Dictation History and the clipboard (when enabled) without typing
+the same dictation a second time. Settings still offer `gpt-transcribe` and `whisper-1`
+for file transcription and recovery.
+
+The language selector supplies the plural `languages` hint to Realtime transcription;
+Auto Detect omits the hint. See [OpenAI Realtime transcription](https://developers.openai.com/api/docs/guides/realtime-transcription)
+and [OpenAI file transcription](https://developers.openai.com/api/docs/guides/speech-to-text).
 
 Run regression checks with `python -m pytest -q`.
 

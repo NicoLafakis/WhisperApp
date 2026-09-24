@@ -42,3 +42,22 @@ class TextInserter:
             time.sleep(0.025)
         keyboard.press_and_release("ctrl+v")
         return True
+
+    @staticmethod
+    def type_text(text: str) -> bool:
+        """Type Unicode directly without disturbing a held push-to-talk chord."""
+        payload = text or ""
+        if not payload:
+            return False
+
+        # keyboard.write() temporarily releases held keys. That would release the
+        # push-to-talk shortcut and can stop capture mid-phrase. Sending Unicode
+        # packets directly leaves physical modifier state and the clipboard alone.
+        if os.name == "nt":
+            type_unicode = keyboard._os_keyboard.type_unicode
+            for character in payload:
+                type_unicode(character)
+            return True
+
+        keyboard.write(payload)
+        return True
