@@ -1,5 +1,9 @@
 ﻿__pycache__/
 *.pyc
+.pytest_cache/
+.pytest-*/
+.pytest-*.log
+.packaging-*.log
 .venv/
 .whisperapp/
 **/node_modules/
@@ -8,3 +12,5 @@ dist/
 demo/
 installer/*.exe
 installer/*.zip
+MagicMock/
+PyAudio-*.whl
