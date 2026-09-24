@@ -400,3 +400,16 @@ time.sleep(60)
         if process.poll() is None:
             process.kill()
             process.wait(timeout=5)
+
+
+def test_dictation_store_sanitizes_live_transcribe_model(tmp_path):
+    path = wav(tmp_path / "recording_legacy_live.wav")
+    store = DictationStore(tmp_path)
+    store.update(path, state="transcribing", model="gpt-live-transcribe")
+    # Reading should map gpt-live-transcribe to DEFAULT_TRANSCRIPTION_MODEL
+    assert store.read(path)["model"] == "gpt-transcribe"
+    store.recover()
+    job = store.next_job()
+    assert job is not None
+    assert job["model"] == "gpt-transcribe"
+

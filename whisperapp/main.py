@@ -1,4 +1,4 @@
-﻿import ctypes
+import ctypes
 import logging
 import sys
 import time
@@ -863,7 +863,7 @@ class WhisperTrayApp(QObject):
                 if self.audio_recorder.output_path is not None:
                     self.store.update(
                         self.audio_recorder.output_path,
-                        model="gpt-live-transcribe",
+                        model=str(self.settings.get("model", DEFAULT_TRANSCRIPTION_MODEL)),
                         language=str(self.settings.get("language", "")),
                     )
             except Exception:

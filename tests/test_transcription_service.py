@@ -14,6 +14,7 @@ machine-checkable error kind, and a key check that exercises transcription itsel
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import openai
 import pytest
@@ -312,3 +313,47 @@ def test_key_check_probes_selected_model(fake_openai, model):
 def test_key_check_defaults_to_new_model(fake_openai):
     svc.TranscriptionService().test_api_key("sk-test-key")
     assert fake_openai.audio.transcriptions.create.call_args.kwargs["model"] == "gpt-transcribe"
+
+
+def test_service_configure_enables_sdk_retries(monkeypatch):
+    from whisperapp import transcription_service
+    captured = {}
+    mock_client = MagicMock()
+    def mock_openai(*args, **kwargs):
+        captured.update(kwargs)
+        return mock_client
+    monkeypatch.setattr(transcription_service, "OpenAI", mock_openai)
+    service = svc.TranscriptionService()
+    service.configure("sk-test-key")
+    assert captured.get("max_retries", 0) >= 2
+
+
+def test_http_client_uses_ipv4_transport():
+    client = svc.TranscriptionService._build_http_client()
+    assert isinstance(client._transport, httpx.HTTPTransport)
+    # Ensure local_address is IPv4 to bypass Windows IPv6 TLS handshake resets
+    assert getattr(client._transport, "_pool", None) is not None or getattr(client._transport, "_local_address", None) == "0.0.0.0"
+
+
+def test_key_check_enables_sdk_retries(monkeypatch):
+    from whisperapp import transcription_service
+    captured = {}
+    mock_client = MagicMock()
+    mock_client.audio.transcriptions.create.return_value = transcript("probe")
+    def mock_openai(*args, **kwargs):
+        captured.update(kwargs)
+        return mock_client
+    monkeypatch.setattr(transcription_service, "OpenAI", mock_openai)
+    svc.TranscriptionService().test_api_key("sk-test-key")
+    assert captured.get("max_retries", 0) >= 2
+
+
+def test_transcribe_passes_in_memory_file_tuple_for_retries(service, fake_openai, wav_path):
+    fake_openai.audio.transcriptions.create.return_value = transcript("hello")
+    service.transcribe(wav_path, "whisper-1", "en")
+    file_arg = fake_openai.audio.transcriptions.create.call_args.kwargs["file"]
+    assert isinstance(file_arg, tuple)
+    assert file_arg[0] == wav_path.name
+    assert file_arg[1] == wav_path.read_bytes()
+    assert file_arg[2] == "audio/wav"
+

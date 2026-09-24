@@ -10,6 +10,8 @@ import math
 import logging
 from pathlib import Path
 
+from whisperapp.config_manager import DEFAULT_TRANSCRIPTION_MODEL
+
 
 def atomic_text(path: Path, text: str) -> None:
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
@@ -51,6 +53,8 @@ class DictationStore:
             for field in ("model", "language", "error"):
                 if field in data and not isinstance(data[field], str):
                     del data[field]
+            if data.get("model") == "gpt-live-transcribe":
+                data["model"] = DEFAULT_TRANSCRIPTION_MODEL
             data["path"] = str(wav_path)
             # Text is committed first, so interrupted metadata writes cannot hide it.
             if wav_path.with_suffix(".txt").exists():
@@ -97,7 +101,10 @@ class DictationStore:
                 try:
                     if job["state"] == "recording":
                         self._repair_interrupted_wav(path)
-                    self.update(path, state="pending", next_retry=0)
+                    changes = {"state": "pending", "next_retry": 0}
+                    if job.get("model") == "gpt-live-transcribe":
+                        changes["model"] = DEFAULT_TRANSCRIPTION_MODEL
+                    self.update(path, **changes)
                 except OSError:
                     logging.exception("Could not recover %s; preserving it for manual recovery", path.name)
 

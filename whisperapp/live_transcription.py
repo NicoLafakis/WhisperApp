@@ -144,7 +144,7 @@ class LiveTranscriptionThread(QThread):
             async with client.realtime.connect(model="gpt-realtime") as connection:
                 await connection.session.update(
                     session={
-                        "type": "transcription",
+                        "type": "realtime",
                         "audio": {"input": session_audio},
                     }
                 )

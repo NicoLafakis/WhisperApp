@@ -39,7 +39,7 @@ def test_live_session_commits_a_phrase_and_returns_its_final_text(monkeypatch):
             self.input_audio_buffer = SimpleNamespace(append=self.append, commit=self.commit)
 
         async def update(self, *, session):
-            assert session["type"] == "transcription"
+            assert session["type"] == "realtime"
             assert session["audio"]["input"]["format"]["rate"] == 24000
             assert session["audio"]["input"]["transcription"]["languages"] == ["en"]
 

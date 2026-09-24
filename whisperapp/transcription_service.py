@@ -1,6 +1,7 @@
-﻿import io
+import io
 import logging
 import math
+import socket
 import wave
 from array import array
 from dataclasses import dataclass
@@ -17,6 +18,25 @@ from whisperapp.config_manager import DEFAULT_TRANSCRIPTION_MODEL
 
 
 logger = logging.getLogger(__name__)
+
+_orig_getaddrinfo = socket.getaddrinfo
+
+
+def prefer_ipv4() -> None:
+    """Sort DNS results so AF_INET (IPv4) comes before AF_INET6 (IPv6).
+
+    On Windows, Cloudflare edge IPv6 addresses (e.g. 2606:4700:7::f3) intermittently
+    reset TLS handshakes with WinError 10054, while IPv4 is rock-solid. Prioritizing
+    IPv4 resolves the intermittent connection dropouts.
+    """
+    def _ipv4_first_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        res = _orig_getaddrinfo(host, port, family, type, proto, flags)
+        return sorted(res, key=lambda x: 0 if x[0] == socket.AF_INET else 1)
+
+    socket.getaddrinfo = _ipv4_first_getaddrinfo
+
+
+prefer_ipv4()
 
 
 # OpenAI rejects any transcription upload larger than this.
@@ -168,7 +188,8 @@ class TranscriptionService:
 
     @staticmethod
     def _build_http_client() -> httpx.Client:
-        return httpx.Client(timeout=60.0, follow_redirects=True)
+        transport = httpx.HTTPTransport(local_address="0.0.0.0", retries=2)
+        return httpx.Client(timeout=60.0, follow_redirects=True, transport=transport)
 
     def configure(self, api_key: str) -> None:
         api_key = (api_key or "").strip()
@@ -176,8 +197,9 @@ class TranscriptionService:
             self._client = None
             return
 
-        # Retry scheduling belongs to the durable queue so it survives restarts.
-        self._client = OpenAI(api_key=api_key, http_client=self._build_http_client(), max_retries=0)
+        # Enable SDK-level immediate retries (2) for transient network drops/TLS resets
+        # before delegating long-tail recovery to the durable SQLite queue.
+        self._client = OpenAI(api_key=api_key, http_client=self._build_http_client(), max_retries=2)
 
     def test_api_key(self, api_key: str, model: str = PROBE_MODEL) -> TranscriptionResult:
         """Check that *api_key* can transcribe, not merely that it authenticates.
@@ -201,9 +223,7 @@ class TranscriptionService:
             client = OpenAI(
                 api_key=api_key,
                 http_client=self._build_http_client(),
-                # A quota failure will never succeed on retry, and the user is waiting
-                # on a dialog - answer on the first response.
-                max_retries=0,
+                max_retries=2,
             )
             client.audio.transcriptions.create(
                 model=model,
@@ -235,9 +255,10 @@ class TranscriptionService:
 
         try:
             with wav_path.open("rb") as audio_file:
+                wav_bytes = audio_file.read()
                 kwargs = {
                     "model": model,
-                    "file": audio_file,
+                    "file": (wav_path.name, wav_bytes, "audio/wav"),
                 }
                 if language:
                     if model == DEFAULT_TRANSCRIPTION_MODEL:
