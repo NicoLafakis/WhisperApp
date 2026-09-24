@@ -16,9 +16,11 @@ assert on the outcome (nothing left registered) rather than on any particular fi
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 import pytest
 
+from whisperapp import hotkey_listener
 from whisperapp.hotkey_listener import HotkeyListener
 
 
@@ -83,3 +85,63 @@ def test_restart_after_stop_registers_cleanly(fake_keyboard, listener):
     listener.start()
 
     assert len(fake_keyboard.registered) == 2
+
+
+def test_stale_library_modifier_state_cannot_start_recording(fake_keyboard, monkeypatch):
+    starts = []
+    listener = HotkeyListener(on_start=lambda: starts.append(True), on_stop=lambda: None)
+    # The hook library can retain a modifier after Windows has seen its key-up.
+    # A later ordinary space press must not open the microphone.
+    monkeypatch.setattr(hotkey_listener, "_physical_hotkey_is_down", lambda keys: False)
+    listener._handle_press(object())
+    assert starts == []
+    assert not listener._active
+
+
+def test_physically_held_hotkey_still_starts_and_releases(fake_keyboard, monkeypatch):
+    events = []
+    listener = HotkeyListener(on_start=lambda: events.append("start"),
+                              on_stop=lambda: events.append("stop"))
+    monkeypatch.setattr(hotkey_listener, "_physical_hotkey_is_down", lambda keys: True)
+    listener._handle_press(object())
+    listener._handle_release(object())
+    assert events == ["start", "stop"]
+
+
+def test_windows_modifier_check_uses_current_down_bit(monkeypatch):
+    class KeyState:
+        def __init__(self):
+            self.values = {0x11: 0x8000, 0x10: 0x8000}
+
+        def __call__(self, code):
+            return self.values.get(code, 0)
+
+    state = KeyState()
+    monkeypatch.setattr(hotkey_listener.ctypes, "WinDLL",
+                        lambda *_args, **_kwargs: SimpleNamespace(GetAsyncKeyState=state))
+    assert hotkey_listener._physical_hotkey_is_down(["ctrl", "shift"])
+    state.values[0x10] = 1  # Recently pressed is not currently held.
+    assert not hotkey_listener._physical_hotkey_is_down(["ctrl", "shift"])
+
+
+def test_custom_hotkey_modifier_is_checked_physically(monkeypatch):
+    class KeyState:
+        def __init__(self):
+            self.value = 0
+
+        def __call__(self, code):
+            return self.value if code == 0x14 else 0
+
+    state = KeyState()
+    class MapScan:
+        def __call__(self, scan, _mode):
+            return 0x14 if scan == 58 else 0
+
+    mapper = MapScan()
+    monkeypatch.setattr(hotkey_listener.ctypes, "WinDLL",
+                        lambda *_args, **_kwargs: SimpleNamespace(GetAsyncKeyState=state,
+                                                                  MapVirtualKeyW=mapper))
+    monkeypatch.setattr(hotkey_listener.keyboard, "key_to_scan_codes", lambda name: (58,))
+    assert not hotkey_listener._physical_hotkey_is_down(["capslock"])
+    state.value = 0x8000
+    assert hotkey_listener._physical_hotkey_is_down(["capslock"])

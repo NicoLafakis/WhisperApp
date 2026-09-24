@@ -1,10 +1,52 @@
 ﻿import logging
+import ctypes
+import os
 from typing import Callable, Optional
 
 import keyboard
 
 
 logger = logging.getLogger(__name__)
+
+_WINDOWS_MODIFIER_KEYS = {
+    "ctrl": 0x11, "control": 0x11, "shift": 0x10,
+    "alt": 0x12, "windows": (0x5B, 0x5C), "win": (0x5B, 0x5C),
+}
+
+
+def _physical_hotkey_is_down(modifiers: list[str]) -> bool:
+    """Cross-check held modifiers against Windows, not the hook's cached state.
+
+    The primary key is excluded because its low-level hook can run before
+    Windows updates the asynchronous state for that same key.
+    """
+    if os.name != "nt":
+        return True
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    get_state = user32.GetAsyncKeyState
+    get_state.argtypes = (ctypes.c_int,)
+    get_state.restype = ctypes.c_short
+    for name in modifiers:
+        codes = _WINDOWS_MODIFIER_KEYS.get(name)
+        if codes is None:
+            # The editable shortcut can include another key (for example Caps Lock).
+            # Resolve that key to a Windows virtual key rather than trusting stale
+            # keyboard-library state or silently skipping the physical check.
+            try:
+                scan_codes = keyboard.key_to_scan_codes(name)
+            except (KeyError, ValueError):
+                return False
+            map_scan = user32.MapVirtualKeyW
+            map_scan.argtypes = (ctypes.c_uint, ctypes.c_uint)
+            map_scan.restype = ctypes.c_uint
+            codes = tuple(vk for scan in scan_codes if (vk := map_scan(scan, 3)))
+            if not codes:
+                return False
+        if isinstance(codes, int):
+            codes = (codes,)
+        if not any(get_state(code) & 0x8000 for code in codes):
+            return False
+    return True
 
 
 class HotkeyListener:
@@ -113,11 +155,17 @@ class HotkeyListener:
     def _handle_press(self, _event: object) -> None:
         if self._active:
             return
-        if self._modifiers_pressed():
-            self._active = True
-            self.on_start()
+        if not self._modifiers_pressed():
+            return
+        if not _physical_hotkey_is_down(self._modifiers):
+            logger.warning("Ignored hotkey press: modifiers were not held in Windows")
+            return
+        self._active = True
+        logger.info("Push-to-talk hotkey pressed")
+        self.on_start()
 
     def _handle_release(self, _event: object) -> None:
         if self._active:
             self._active = False
+            logger.info("Push-to-talk hotkey released")
             self.on_stop()

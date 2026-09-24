@@ -120,8 +120,14 @@ class DictationStore:
             handle.flush()
             os.fsync(handle.fileno())
 
-    def next_job(self, now=None):
+    def next_job(self, now=None, include_retries=True):
         now = time.time() if now is None else now
-        return next((job for job in self.jobs()
-                     if job["state"] in ("pending", "retry")
-                     and job.get("next_retry", 0) <= now), None)
+        jobs = self.jobs()
+        # New dictations should not wait behind older connection-failure retries.
+        # Preserve creation order within each class and keep every retry durable.
+        for state in (("pending", "retry") if include_retries else ("pending",)):
+            due = next((job for job in jobs if job["state"] == state
+                        and job.get("next_retry", 0) <= now), None)
+            if due is not None:
+                return due
+        return None

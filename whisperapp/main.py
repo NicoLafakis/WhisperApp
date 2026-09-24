@@ -376,6 +376,8 @@ class WhisperTrayApp(QObject):
         self._audio_thread = None
         self._is_transcribing = False
         self._worker_thread = None
+        self._retry_thread = None
+        self._retry_job_path: Optional[Path] = None
         self._last_recording: Optional[Path] = None
         self._indicator_job_path: Optional[Path] = None
         self._last_text = ""
@@ -736,7 +738,7 @@ class WhisperTrayApp(QObject):
 
     def retry_recording(self, path: str) -> None:
         wav_path = Path(path)
-        if wav_path == self._active_job_path or not wav_path.is_file():
+        if wav_path in (self._active_job_path, self._retry_job_path) or not wav_path.is_file():
             return
         if self.store.text(wav_path):
             self.show_history()
@@ -770,24 +772,33 @@ class WhisperTrayApp(QObject):
         return True
 
     def _process_queue(self) -> None:
-        if self._closing or self._is_transcribing:
+        if self._closing:
             return
-        # completed is emitted just before QThread.run returns. Never destroy a
-        # still-running thread by replacing the sole Python reference to it.
-        if self._worker_thread is not None and self._worker_thread.isRunning():
+        retry_running = self._retry_thread is not None and self._retry_thread.isRunning()
+        foreground_running = (self._worker_thread is not None
+                              and self._worker_thread is not self._retry_thread
+                              and self._worker_thread.isRunning())
+        # A fresh take gets its own lane even when an old network retry is busy.
+        if foreground_running:
             return
         try:
-            job = self.store.next_job()
+            job = self.store.next_job(include_retries=not self._is_recording and not retry_running)
             if job is None:
                 return
             wav_path = Path(job["path"])
+            is_retry = job["state"] == "retry"
             self.store.update(wav_path, state="transcribing", attempts=job.get("attempts", 0) + 1)
         except Exception:
             logging.exception("Could not read or update transcription queue")
             if not self._is_recording:
                 self.recording_indicator.finish("FAILED", "Audio saved; queue unavailable.", 7000)
             return
-        self._active_job_path = wav_path
+        if is_retry:
+            self._retry_job_path = wav_path
+            if not retry_running and not foreground_running:
+                self._active_job_path = wav_path
+        else:
+            self._active_job_path = wav_path
         self._is_transcribing = True
         self.retry_action.setEnabled(False)
         if not self._is_recording:
@@ -798,33 +809,44 @@ class WhisperTrayApp(QObject):
                 self.recording_indicator.set_state("TRANSCRIBING")
                 self.recording_indicator.set_partial_text("")
                 self.set_status("Transcribing saved audio...")
-        self._worker_thread = TranscriptionThread(
+        worker = TranscriptionThread(
             service=self.transcription_service,
             wav_path=wav_path,
             model=str(job.get("model", self.settings.get("model", DEFAULT_TRANSCRIPTION_MODEL))),
             language=str(job.get("language", self.settings.get("language", "en"))),
             store=self.store,
         )
-        self._worker_thread.completed.connect(self._on_transcription_finished)
-        self._worker_thread.partial_text.connect(self._on_transcription_partial)
-        self._worker_thread.finished.connect(self._process_queue)
-        self._worker_thread.start()
+        worker.completed.connect(lambda result, path=wav_path: self._on_transcription_finished(result, path))
+        worker.partial_text.connect(lambda text, path=wav_path: self._on_transcription_partial(text, path))
+        worker.finished.connect(self._process_queue)
+        if is_retry:
+            self._retry_thread = worker
+        if not is_retry or self._worker_thread is None or not self._worker_thread.isRunning():
+            self._worker_thread = worker
+        worker.start()
 
-    def _on_transcription_partial(self, text: str) -> None:
+    def _on_transcription_partial(self, text: str, wav_path: Optional[Path] = None) -> None:
+        wav_path = wav_path or self._active_job_path
         if (self._is_recording or self._closing or not self._is_transcribing
-                or self._active_job_path != self._indicator_job_path):
+                or wav_path != self._indicator_job_path):
             return
         self.recording_indicator.set_state("TRANSCRIBING")
         self.recording_indicator.set_partial_text(text)
 
-    def _on_transcription_finished(self, result: TranscriptionResult) -> None:
-        wav_path = self._active_job_path
+    def _on_transcription_finished(self, result: TranscriptionResult, wav_path: Optional[Path] = None) -> None:
+        if self._closing:
+            return
+        wav_path = wav_path or self._active_job_path
         display_current = not self._is_recording and wav_path == self._indicator_job_path
         if display_current:
             self._indicator_job_path = None
-        self._active_job_path = None
-        self._is_transcribing = False
-        self.retry_action.setEnabled(not self._is_recording and self._last_recording is not None)
+        if wav_path == self._active_job_path:
+            self._active_job_path = None
+        if wav_path == self._retry_job_path:
+            self._retry_job_path = None
+        self._is_transcribing = self._active_job_path is not None or self._retry_job_path is not None
+        self.retry_action.setEnabled(not self._is_recording and not self._is_transcribing
+                                     and self._last_recording is not None)
 
         if not result.ok or not result.text.strip():
             kind = result.error_kind or TranscriptionErrorKind.UNKNOWN
@@ -858,8 +880,9 @@ class WhisperTrayApp(QObject):
 
         text = result.text.strip()
         self._last_failure_kind = None
-        self._last_text = text
-        self.copy_action.setEnabled(True)
+        if wav_path == self._last_recording:
+            self._last_text = text
+            self.copy_action.setEnabled(True)
         if wav_path is not None:
             try:
                 self.store.complete(wav_path, text)
@@ -867,6 +890,11 @@ class WhisperTrayApp(QObject):
                 logging.exception("Failed to save text; exposing it for manual recovery")
                 QMessageBox.warning(None, "Text Could Not Be Saved", "Copy this text now:\n\n" + text)
         target = self._paste_targets.pop(str(wav_path), None)
+        if wav_path != self._last_recording and target is None:
+            # A background recovery must not replace the clipboard or last-text
+            # action after a newer take has already completed.
+            self.notify("Earlier Dictation Saved", "An older transcription is ready in Dictation History.")
+            return
         # Recovered/backlogged text must not be pasted into an unrelated window.
         if self._is_recording or target is None or target != self.text_inserter.foreground_window():
             if bool(self.settings.get("auto_copy", True)):
@@ -977,6 +1005,14 @@ class WhisperTrayApp(QObject):
         # it is running; queued jobs remain on disk if the process is terminated.
         if self._worker_thread is not None:
             self._worker_thread.wait()
+        if self._retry_thread is not None and self._retry_thread is not self._worker_thread:
+            self._retry_thread.wait()
+        for worker in {self._worker_thread, self._retry_thread} - {None}:
+            for signal in (worker.completed, worker.partial_text, worker.finished):
+                try:
+                    signal.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
 
 
 def main() -> int:

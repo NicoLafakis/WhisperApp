@@ -83,6 +83,7 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 ### FR-3. Push-to-Talk Recording
 
 - **FR-3.1** The default hotkey shall be `Ctrl+Shift+Space`.
+- **FR-3.1a** Before a global hotkey press starts capture on Windows, the listener shall confirm the modifiers are currently held, so stale hook state cannot open the microphone.
 - **FR-3.2** Recording shall start when `space` is pressed while `ctrl` and `shift` are held.
 - **FR-3.3** Recording shall stop when `space` is released.
 - **FR-3.4** The app shall prevent concurrent audio captures while allowing a new recording to begin while an earlier recording is being transcribed.
@@ -93,7 +94,8 @@ WhisperApp is a Windows system-tray utility that provides push-to-talk speech tr
 - **FR-3.8** The audio recorder shall use `threading.Lock` for thread-safe start/stop and `threading.Event` for the recording loop.
 - **FR-3.9** Opening and stopping the audio device shall run outside the Qt UI thread. Hotkey press and release shall return to the UI immediately; a release received during device startup shall stop recording as soon as startup completes.
 - **FR-3.10** The indicator shall show explicit microphone opening, recording, saving, processing, queued, and retrying states. Five red LED columns shall respond to actual microphone level during recording. Non-recording work states shall animate separately and show elapsed time. The indicator shall remain visible until insertion, a recoverable text result, or failure is reported.
-- **FR-3.11** Completed-take retention scans shall not delay opening the microphone or finalizing audio.
+- **FR-3.11** Fresh pending dictations shall be transcribed before older due retries, with a foreground worker that can run while an older retry remains in flight. Background retries shall wait during active capture; all saved recordings remain durable for later retry.
+- **FR-3.12** Completed-take retention scans shall not delay opening the microphone or finalizing audio.
 
 ### FR-4. Transcription
 

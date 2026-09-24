@@ -19,6 +19,8 @@ def tray(tmp_path):
     controller._stop_after_start = False
     controller._audio_thread = None
     controller._is_transcribing = False
+    controller._retry_thread = None
+    controller._retry_job_path = None
     controller._last_recording = tmp_path / "recording_test.wav"
     controller._last_recording.write_bytes(b"saved audio")
     controller.retry_action = MagicMock()

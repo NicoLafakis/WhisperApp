@@ -1,6 +1,6 @@
 # Dictation latency and feedback remediation
 
-**Status:** Five-column follow-up packaged, supervisor-reviewed, installed, and running
+**Status:** Hotkey and queue follow-up implemented, reviewed, packaged, and installed; physical hotkey and microphone behavior needs a user-session check.
 **Scope:** Push-to-talk startup/save latency, recording feedback, transcription progress, and clipboard recovery.
 
 ## Findings
@@ -32,3 +32,11 @@ The indicator is immediate, but actual microphone activation still depends on Wi
 - Supervisor re-review passed. The corrected PyInstaller build and Inno Setup installer compiled successfully. The previous app uninstalled successfully; the new installer exited 0, and the relaunched installed executable matched the packaged binary by SHA-256. Settings and recording-history folders remained present.
 - For the five-column follow-up, the focused rendering test failed before the change and passed afterward. The full suite remained at **128 passed, 1 skipped**. PyInstaller and Inno Setup compiled successfully; the previous app uninstalled, the new installer exited 0, and the relaunched installed executable matched the packaged binary by SHA-256.
 - Physical microphone activation and a live OpenAI transcription were not exercised in this unattended pass. The earlier local PortAudio diagnostic could not open the microphone device, so the device-dependent latency and captured-audio path still need a real user dictation to verify.
+
+## 2026-09-23 hotkey and short-dictation regression
+
+- The keyboard hook's cached modifier state could be stale after a missed key-up. A later space press could then be mistaken for `Ctrl+Shift+Space`. The hotkey listener now cross-checks held modifiers against Windows `GetAsyncKeyState` before starting capture and logs accepted presses and releases. Configured custom chord keys use Windows scan-code mapping for the same check. The primary key is excluded because Windows updates its asynchronous state after the low-level hook callback.
+- A due retry from an older failed upload was selected before a new pending dictation. Fresh pending recordings now take priority, while older retries remain durable. Background retries do not start during a new recording. If a retry is already in flight, the new recording gets a separate foreground transcription worker and can complete without waiting for that retry. A late older result remains in History and cannot overwrite the newer clipboard or Last Transcription action.
+- The five-column widget rendered at approximately **0.45 ms per frame** in an offscreen 1,000-frame local measurement. It is not on the network or transcription worker path. The live log showed repeated `WinError 10054` connection resets, and a separate unauthenticated TLS check also reset intermittently. A 0.25-second local probe with the configured API key completed in **1.33 s without streaming** and **0.66 s with streaming**; this single probe does not establish typical latency.
+- Regression tests first failed for stale modifier state, retry ordering, an in-flight retry blocking a new take, custom chord verification, and a late retry replacing the clipboard; each passed after its fix. The installed microphone and real hotkey behavior still require a user-session check.
+- The independent supervisor re-review passed: **47 focused tests passed** and the full suite finished at **135 passed, 1 skipped**. PyInstaller and Inno Setup rebuilt successfully. The previous installation was removed, the new installer exited 0, and the relaunched installed executable matched the packaged executable by SHA-256. Settings and recording-history folders remained present.

@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -50,6 +51,26 @@ def test_retry_respects_backoff(tmp_path):
     store.update(path, state="retry", next_retry=100)
     assert store.next_job(now=99) is None
     assert store.next_job(now=100)["path"] == str(path)
+
+
+def test_fresh_dictation_is_processed_before_older_due_retry(tmp_path):
+    store = DictationStore(tmp_path)
+    older = wav(tmp_path / "recording_older.wav")
+    fresh = wav(tmp_path / "recording_fresh.wav")
+    store.enqueue(older, "gpt-transcribe", "en")
+    store.enqueue(fresh, "gpt-transcribe", "en")
+    store.update(older, state="retry", created=10, next_retry=20)
+    store.update(fresh, state="pending", created=30)
+    assert store.next_job(now=40)["path"] == str(fresh)
+
+
+def test_background_retry_waits_while_a_new_recording_is_captured(tmp_path):
+    store = DictationStore(tmp_path)
+    older = wav(tmp_path / "recording_retry.wav")
+    store.enqueue(older, "gpt-transcribe", "en")
+    store.update(older, state="retry", next_retry=20)
+    assert store.next_job(now=40, include_retries=False) is None
+    assert store.next_job(now=40)["path"] == str(older)
 
 
 def test_restart_retains_failed_job_and_resumes_it_when_due(tmp_path):
@@ -231,6 +252,40 @@ def test_recording_is_accepted_while_previous_upload_is_running(controller):
     pump(app, lambda: tray._audio_thread is not None and not tray._audio_thread.isRunning())
     tray.audio_recorder.start_recording.assert_called_once()
     assert tray._is_recording
+
+
+def test_fresh_dictation_completes_while_older_retry_is_still_in_flight(controller, tmp_path):
+    app, tray = controller
+    retry = wav(tmp_path / "recording_retry_in_flight.wav")
+    fresh = wav(tmp_path / "recording_fresh_in_flight.wav")
+    retry_started = threading.Event()
+    release_retry = threading.Event()
+
+    def transcribe(*, wav_path, **_kwargs):
+        if wav_path == retry:
+            retry_started.set()
+            release_retry.wait(3)
+            return TranscriptionResult(text="Old recovery")
+        return TranscriptionResult(text="Fresh dictation")
+
+    tray.transcription_service.transcribe = transcribe
+    tray.store.enqueue(retry, "gpt-transcribe", "en")
+    tray.store.update(retry, state="retry", next_retry=0, created=1)
+    tray._process_queue()
+    assert retry_started.wait(1)
+    try:
+        tray._start_transcription(fresh)
+        pump(app, lambda: tray.store.text(fresh) == "Fresh dictation", timeout=1)
+        assert not tray.store.text(retry)
+    finally:
+        release_retry.set()
+        pump(app, lambda: bool(tray.store.text(retry)))
+        pump(app, lambda: tray._retry_job_path is None)
+        assert tray._last_text == "Fresh dictation"
+        tray.text_inserter.copy_text.assert_not_called()
+        pump(app, lambda: not tray._retry_thread.isRunning()
+             and not tray._worker_thread.isRunning())
+        app.processEvents()
 
 
 def test_new_recording_prevents_late_paste_from_older_job(controller):
