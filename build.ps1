@@ -1,4 +1,4 @@
-﻿# WhisperApp Build Script
+# WhisperApp Build Script
 param(
     [switch]$Clean,
     [switch]$SkipInstall,
@@ -72,7 +72,7 @@ if (-not $SkipInstall) {
 }
 
 Write-Header 'Building WhisperApp (PyInstaller onedir)'
-& $pyinstaller WhisperApp.spec --clean
+& $pyinstaller WhisperApp.spec --clean -y
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed.' }
 $payload = Join-Path $PSScriptRoot 'dist\WhisperApp'
 $exePath = Join-Path $payload 'WhisperApp.exe'
