@@ -1,6 +1,6 @@
 # Dictation latency and feedback remediation
 
-**Status:** Hotkey and queue follow-up implemented, reviewed, packaged, and installed; physical hotkey and microphone behavior needs a user-session check.
+**Status:** Capture and queue work retained. The 2026-09-25 rollback restored the mic-responsive waveform and file transcription; physical hotkey and microphone behavior needs a user-session check.
 **Scope:** Push-to-talk startup/save latency, recording feedback, transcription progress, and clipboard recovery.
 
 ## Findings
@@ -15,7 +15,7 @@
 
 1. Run audio startup and finalization in a retained `QThread`; show `STARTING` immediately and safely honor a hotkey release that arrives during startup.
 2. Start capture before scheduling retention cleanup. Update the meter as soon as each audio chunk arrives, before disk flush and sync.
-3. Use five vertical red LED columns modeled on KITT's voice module. Their lit segments follow the actual microphone level while recording; opening, saving, processing, queued, and retrying have a separate animation and elapsed timer.
+3. Use the earlier red waveform. Its amplitude and movement follow microphone level while recording; opening, saving, processing, queued, and retrying retain status text and elapsed time without simulated mic movement.
 4. Use OpenAI's streamed file-transcription events for the default GPT Transcribe model and show accumulated partial text in the indicator. Keep `whisper-1` on its supported non-streaming request. Never insert preview text into the target app; paste only the final transcript.
 5. If the final transcript cannot be pasted because focus changed, copy the current successful result when automatic copy is enabled. On failure, preserve the existing clipboard and tell the user that audio remains in Dictation History and the clipboard is unchanged.
 6. Keep the overlay visible from hotkey press through save and transcription, including automatic retry waits. Show a brief final result after insertion or failure. Cancel any scheduled hide when a new recording or job begins.
@@ -26,9 +26,9 @@ The indicator is immediate, but actual microphone activation still depends on Wi
 
 ## Verification
 
-- Focused tests cover worker-thread startup, immediate UI feedback, release during startup, voice LED response to microphone level, processing animation, continuous display through save and retry, streamed text deltas, legacy model fallback, and clipboard replacement after focus changes. Current focused result: **18 passed**.
-- Current full suite: **128 passed, 1 skipped**. The skip is the release-verifier test that requires `Microsoft.PowerShell.Security`, which this PowerShell host could not load.
-- Rendered the recording and processing states offscreen for visual review. The original three-column recording state was reviewed visually; the five-column follow-up has a pixel-level rendering test. The processing state shows a distinct status label, elapsed time, and animated columns.
+- Focused tests cover worker-thread startup, immediate UI feedback, release during startup, waveform response to microphone level, continuous display through save and retry, streamed text deltas, legacy model fallback, and clipboard replacement after focus changes.
+- The 2026-09-25 rollback suite passed: **140 passed**. The PyInstaller build and Inno Setup installer completed; uninstall and reinstall preserved settings and 59 WAV recordings. The installed executable matched the rebuilt package by SHA-256 and launched with the saved `Ctrl+Alt+Space` shortcut.
+- The waveform was rendered offscreen for visual review. Processing shows a status label and elapsed time while the waveform stops moving.
 - Supervisor re-review passed. The corrected PyInstaller build and Inno Setup installer compiled successfully. The previous app uninstalled successfully; the new installer exited 0, and the relaunched installed executable matched the packaged binary by SHA-256. Settings and recording-history folders remained present.
 - For the five-column follow-up, the focused rendering test failed before the change and passed afterward. The full suite remained at **128 passed, 1 skipped**. PyInstaller and Inno Setup compiled successfully; the previous app uninstalled, the new installer exited 0, and the relaunched installed executable matched the packaged binary by SHA-256.
 - Physical microphone activation and a live OpenAI transcription were not exercised in this unattended pass. The earlier local PortAudio diagnostic could not open the microphone device, so the device-dependent latency and captured-audio path still need a real user dictation to verify.

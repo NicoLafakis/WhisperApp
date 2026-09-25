@@ -19,41 +19,6 @@ import pytest
 from openai import OpenAI
 
 
-@pytest.fixture(autouse=True)
-def disable_live_network_for_ui_tests(monkeypatch):
-    """Keep controller tests deterministic; realtime protocol tests use a fake SDK."""
-    from whisperapp import main
-
-    class Signal:
-        def connect(self, *_args, **_kwargs):
-            pass
-
-    class IdleLiveWorker:
-        def __init__(self, *_args, **_kwargs):
-            self.ready = Signal()
-            self.phrase_completed = Signal()
-            self.failed = Signal()
-            self.completed = Signal()
-            self.finished = Signal()
-
-        def start(self):
-            pass
-
-        def wait(self, *_args):
-            return True
-
-        def isRunning(self):
-            return False
-
-        def finish_recording(self):
-            pass
-
-        def enqueue_audio(self, _chunk):
-            return False
-
-    monkeypatch.setattr(main, "LiveTranscriptionThread", IdleLiveWorker)
-
-
 # --------------------------------------------------------------------------------------
 # OpenAI error factory
 # --------------------------------------------------------------------------------------

@@ -200,7 +200,6 @@ class AudioRecorder:
         max_duration_seconds: float = MAX_RECORDING_SECONDS,
         on_max_duration_reached: Optional[Callable[[Optional[Path]], None]] = None,
         on_capture_error: Optional[Callable[[str], None]] = None,
-        on_audio_chunk: Optional[Callable[[bytes], None]] = None,
     ) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
@@ -210,7 +209,6 @@ class AudioRecorder:
         self.max_duration_seconds = max_duration_seconds
         self.on_max_duration_reached = on_max_duration_reached
         self.on_capture_error = on_capture_error
-        self.on_audio_chunk = on_audio_chunk
 
         self._pyaudio = pyaudio.PyAudio()
         self._stream = None
@@ -385,12 +383,6 @@ class AudioRecorder:
                 # the live signal appear frozen.
                 self._update_volume_level(data)
                 self._frames.append(data)
-                if self.on_audio_chunk is not None:
-                    try:
-                        self.on_audio_chunk(data)
-                    except Exception:
-                        # Live streaming must never interrupt the durable WAV writer.
-                        logger.warning("Live transcription audio handoff failed", exc_info=True)
                 self._wav_writer.writeframes(data)
                 self._wav_file.flush()
                 os.fsync(self._wav_file.fileno())

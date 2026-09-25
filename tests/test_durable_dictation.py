@@ -306,41 +306,6 @@ def test_failed_paste_keeps_full_text_on_disk(controller, tmp_path):
     assert DictationStore(tmp_path).text(path) == paragraph.strip()
 
 
-def test_recovery_transcript_is_not_pasted_again_after_live_phrases(controller, tmp_path):
-    app, tray = controller
-    path = wav(tmp_path / "recording_live_fallback.wav")
-    tray._active_job_path = path
-    tray._indicator_job_path = path
-    tray._paste_targets[str(path)] = 123
-    tray._live_partial_paths.add(str(path))
-
-    tray._on_transcription_finished(TranscriptionResult(text="Final fallback transcript"), path)
-
-    tray.text_inserter.insert_text.assert_not_called()
-    tray.text_inserter.type_text.assert_not_called()
-    assert tray.store.text(path) == "Final fallback transcript"
-
-
-def test_live_result_is_read_from_worker_before_queued_completion_signal(controller, tmp_path):
-    from types import SimpleNamespace
-    from whisperapp.live_transcription import LiveTranscriptionResult
-
-    _app, tray = controller
-    path = wav(tmp_path / "recording_live_finish.wav")
-    tray._live_pending_path = path
-    tray._live_inserted = True
-    tray._live_typed_phrases = ["Live phrase"]
-    tray._live_worker = SimpleNamespace(
-        isRunning=lambda: False,
-        result=LiveTranscriptionResult(text="Live phrase"),
-    )
-
-    tray._complete_live_capture(path)
-
-    assert tray.store.text(path) == "Live phrase"
-    tray.text_inserter.insert_text.assert_not_called()
-
-
 def test_focus_change_saves_text_without_pasting_into_wrong_window(controller, tmp_path):
     app, tray = controller
     path = wav(tmp_path / "recording_focus.wav")
@@ -400,16 +365,3 @@ time.sleep(60)
         if process.poll() is None:
             process.kill()
             process.wait(timeout=5)
-
-
-def test_dictation_store_sanitizes_live_transcribe_model(tmp_path):
-    path = wav(tmp_path / "recording_legacy_live.wav")
-    store = DictationStore(tmp_path)
-    store.update(path, state="transcribing", model="gpt-live-transcribe")
-    # Reading should map gpt-live-transcribe to DEFAULT_TRANSCRIPTION_MODEL
-    assert store.read(path)["model"] == "gpt-transcribe"
-    store.recover()
-    job = store.next_job()
-    assert job is not None
-    assert job["model"] == "gpt-transcribe"
-

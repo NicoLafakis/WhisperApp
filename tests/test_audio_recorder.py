@@ -79,18 +79,6 @@ def test_default_duration_cap_keeps_recordings_under_the_upload_limit():
     )
 
 
-def test_live_audio_callback_receives_chunks_without_replacing_wav_capture(make_recorder):
-    chunks = []
-    recorder = make_recorder(on_audio_chunk=chunks.append, max_duration_seconds=0)
-    recorder.start_recording()
-    assert _wait_until(lambda: len(chunks) >= 2)
-    path = recorder.stop_recording()
-    assert path is not None and path.is_file()
-    assert chunks and all(chunk for chunk in chunks)
-    with wave.open(str(path), "rb") as audio:
-        assert audio.getnframes() > 0
-
-
 def test_recorder_stops_itself_at_the_duration_cap(make_recorder, fake_pyaudio):
     recorder = make_recorder(max_duration_seconds=FAST_CAP_SECONDS)
 

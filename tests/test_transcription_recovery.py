@@ -18,15 +18,6 @@ def tray(tmp_path):
     controller._is_stopping = False
     controller._stop_after_start = False
     controller._audio_thread = None
-    controller._live_worker = None
-    controller._live_result = None
-    controller._live_pending_path = None
-    controller._live_inserted = False
-    controller._live_typed_phrases = []
-    controller._live_partial_paths = set()
-    controller._live_focus_lost = False
-    controller._live_error_message = ""
-    controller._closing = False
     controller._is_transcribing = False
     controller._retry_thread = None
     controller._retry_job_path = None
